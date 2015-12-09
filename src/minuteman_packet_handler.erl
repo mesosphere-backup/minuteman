@@ -4,15 +4,15 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 09. Dec 2015 1:41 AM
+%%% Created : 09. Dec 2015 1:36 AM
 %%%-------------------------------------------------------------------
--module(minuteman_ct).
+-module(minuteman_packet_handler).
 -author("sdhillon").
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, handle_mapping/1]).
+-export([start_link/0, handle/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -22,29 +22,28 @@
   terminate/2,
   code_change/3]).
 
+-include_lib("pkt/include/pkt.hrl").
+
+-include_lib("kernel/include/inet.hrl").
+
+-include("enfhackery.hrl").
 -define(SERVER, ?MODULE).
 
 -record(state, {socket}).
-
--include_lib("gen_socket/include/gen_socket.hrl").
--include_lib("gen_netlink/include/netlink.hrl").
--include("enfhackery.hrl").
-
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-handle_mapping(Mapping) ->
-  gen_server:call(?SERVER, {handle_mapping, Mapping}).
+handle(Payload) ->
+  catch gen_server:call(?SERVER, {handle_payload, Payload}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link() ->
-  {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
+-spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
   gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
@@ -67,13 +66,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
-  %% Our fates are linked.
-  {gen_socket, RealPort, _, _, _, _} = Socket,
-  erlang:link(RealPort),
-  ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
-
-  {ok, #state{socket = Socket}}.
+  {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -90,8 +83,8 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({handle_mapping, Mapping}, _From, State = #state{socket = Socket}) ->
-  do_mapping(Mapping, Socket),
+handle_call({handle_payload, Payload}, _From, State) ->
+  do_handle(Payload),
   {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -161,56 +154,48 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-
-nfnl_query(Socket, Query) ->
-  Request = netlink:nl_ct_enc(Query),
-  gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
-  Answer = gen_socket:recv(Socket, 8192),
-  lager:debug("Answer: ~p~n", [Answer]),
-  case Answer of
-    {ok, Reply} ->
-      lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
-      case netlink:nl_ct_dec(Reply) of
-        [{netlink,error,[],_,_,{ErrNo, _}}|_] when ErrNo == 0 ->
-          ok;
-        [{netlink,error,[],_,_,{ErrNo, _}}|_] ->
-          {error, ErrNo};
-        [Msg|_] ->
-          {error, Msg};
-        Other ->
-          Other
-      end;
-    Other ->
-      Other
+is_local(IP) ->
+  {ok, Addresses} = inet:getifaddrs(),
+  is_local(IP, Addresses).
+is_local(IP, []) ->
+  false;
+is_local(IP, [{_Ifname, Ifopt}|Interfaces]) ->
+  Addrs = [Addr ||{addr, Addr} <- Ifopt],
+  case lists:member(IP, Addrs) of
+    true ->
+      true;
+    false ->
+      is_local(IP, Interfaces)
   end.
 
+do_handle(Payload) ->
+  [IP, TCP|_] = pkt:decapsulate(ipv4, Payload),
+  DstAddr = IP#ipv4.daddr,
+  DstPort = TCP#tcp.dport,
+  case minuteman_vip_server:get_backend(DstAddr, DstPort) of
+    {ok, Backend = {BackendIP, BackendPort}} ->
+      lager:debug("Backend: ~p", [Backend]),
+      SrcAddr = IP#ipv4.saddr,
+      SrcPort = TCP#tcp.sport,
+      NewSrcAddr = case {is_local(SrcAddr), is_local(BackendIP)} of
+                   {true, true} ->
+                     {127,0,0,1};
+                   _ ->
+                     SrcAddr
+      end,
+      Mapping = #mapping{orig_src_ip = SrcAddr,
+        orig_src_port = SrcPort,
+        orig_dst_ip = DstAddr,
+        orig_dst_port = DstPort,
+        new_src_ip = NewSrcAddr,
+        new_src_port = SrcPort - 31743,
+        new_dst_ip = BackendIP,
+        new_dst_port = BackendPort},
 
-socket(Family, Type, Protocol, Opts) ->
-  case proplists:get_value(netns, Opts) of
-    undefined ->
-      gen_socket:socket(Family, Type, Protocol);
-    NetNs ->
-      gen_socket:socketat(NetNs, Family, Type, Protocol)
+      lager:debug("Mapping: ~p", [Mapping]),
+      minuteman_ct:handle_mapping(Mapping);
+
+    _ ->
+      lager:debug("Could not map connection")
   end.
 
-do_mapping(Mapping, Socket) ->
-  Seq = erlang:time_offset() + erlang:monotonic_time(),
-  Cmd = {inet, 0, 0, [
-    {tuple_orig,
-      [{ip,[{v4_src,Mapping#mapping.orig_src_ip},{v4_dst,Mapping#mapping.orig_dst_ip}]},
-        {proto,[{num,tcp},{src_port,Mapping#mapping.orig_src_port},{dst_port,Mapping#mapping.orig_dst_port}]}]},
-    {tuple_reply,
-      [{ip,[{v4_src,Mapping#mapping.orig_dst_ip},{v4_dst,Mapping#mapping.orig_src_ip}]},
-        {proto,[{num,tcp},{src_port,Mapping#mapping.orig_dst_port},{dst_port,Mapping#mapping.orig_src_port}]}]},
-    {timeout,100},
-    {protoinfo,[{tcp,[{state,syn_sent}]}]},
-    {nat_src,
-      [{v4_src,Mapping#mapping.new_src_ip},
-        {src_port,[{min_port,Mapping#mapping.new_src_port},{max_port,Mapping#mapping.new_src_port}]}]},
-    {nat_dst,
-      [{v4_dst,Mapping#mapping.new_dst_ip},
-        {dst_port,[{min_port,Mapping#mapping.new_dst_port},{max_port,Mapping#mapping.new_dst_port}]}]}
-  ]},
-  Msg = [#ctnetlink{type = new, flags = [create,excl,ack,request], seq = Seq, pid = 0, msg = Cmd}],
-  Status = nfnl_query(Socket, Msg),
-  lager:debug("Mapping Status: ~p", [Status]).

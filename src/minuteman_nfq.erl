@@ -37,7 +37,7 @@
 ]).
 
 
--include_lib("pkt/include/pkt.hrl").
+
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -define(NFQNL_COPY_PACKET, 2).
@@ -309,4 +309,4 @@ dump_packet_1(_) ->
   ok.
 handle_packet(Info) ->
   {payload, Payload} = lists:keyfind(payload, 1, Info),
-  lager:debug("Payload: ~p", [Payload]).
+  minuteman_packet_handler:handle(Payload).
