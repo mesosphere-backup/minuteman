@@ -2,3 +2,4 @@
 log
 ebin
 .rebar
+rel/minuteman/

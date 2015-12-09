@@ -192,7 +192,7 @@ do_handle(Payload) ->
         new_dst_ip = BackendIP,
         new_dst_port = BackendPort},
 
-      lager:debug("Mapping: ~p", [Mapping]),
+      lager:info("Mapping: ~p", [Mapping]),
       minuteman_ct:handle_mapping(Mapping);
 
     _ ->

@@ -8,7 +8,11 @@
                   stdlib,
                   lager,
                   inets,
-                  pkt
+                  pkt,
+                  gen_netlink,
+                  iptables,
+                  jsx,
+                  gen_socket
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}
