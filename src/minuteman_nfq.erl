@@ -28,7 +28,7 @@
   "xt_tcpudp","x_tables","nf_log_ipv4","nf_log_common","nf_reject_ipv4",
   "nfnetlink_log","nfnetlink_acct","nf_tables","nf_conntrack_netlink",
   "nfnetlink_queue","nfnetlink","nf_nat_masquerade_ipv4","nf_conntrack_ipv4",
-  "nf_defrag_ipv4","nf_nat_ipv4","nf_nat","nf_conntrack"]).
+  "nf_defrag_ipv4","nf_nat_ipv4","nf_nat","nf_conntrack", "iptable_nat", "ipt_MASQUERADE"]).
 -define(RULES, [
   {raw, output, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
   {raw, prerouting, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
