@@ -5,7 +5,10 @@
   {registered, []},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+                  lager,
+                  inets,
+                  pkt
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}
