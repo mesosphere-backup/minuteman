@@ -1,0 +1,12 @@
+{application, minuteman,
+ [
+  {description, ""},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { minuteman_app, []}},
+  {env, []}
+ ]}.
