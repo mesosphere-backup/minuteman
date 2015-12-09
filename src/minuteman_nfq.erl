@@ -294,19 +294,6 @@ process_nfq_packet({_Family, _Version, _Queue, Info},
   Request = netlink:nl_ct_enc(Msg),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
 
-dump_packet(PktInfo) ->
-  lists:foreach(fun dump_packet_1/1, PktInfo).
-
-dump_packet_1({ifindex_indev, IfIdx}) ->
-  lager:debug("InDev: ~w", [IfIdx]);
-dump_packet_1({hwaddr, Mac}) ->
-  lager:debug("HwAddr: ~s", [flower_tools:format_mac(Mac)]);
-dump_packet_1({mark, Mark}) ->
-  lager:debug("Mark: ~8.16.0B", [Mark]);
-dump_packet_1({payload, Data}) ->
-  lager:debug(flower_tools:hexdump(Data));
-dump_packet_1(_) ->
-  ok.
 handle_packet(Info) ->
   {payload, Payload} = lists:keyfind(payload, 1, Info),
   minuteman_packet_handler:handle(Payload).
