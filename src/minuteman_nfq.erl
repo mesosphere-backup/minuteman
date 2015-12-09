@@ -286,7 +286,6 @@ process_nfq_packet({Family, _Version, _Queue, Info}, _State = #state{socket = So
 
 process_nfq_packet({_Family, _Version, _Queue, Info},
   #state{socket = Socket, queue = Queue}) ->
-  dump_packet(Info),
   {_, Id, _, _} = lists:keyfind(packet_hdr, 1, Info),
   NLA = [{verdict_hdr, ?NF_ACCEPT, Id}],
   lager:warning("NLA: ~p", [NLA]),
