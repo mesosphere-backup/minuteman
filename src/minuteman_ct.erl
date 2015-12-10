@@ -171,9 +171,9 @@ nfnl_query(Socket, Query) ->
     {ok, Reply} ->
       lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
-        [{netlink,error,[],_,_,{ErrNo, _}}|_] when ErrNo == 0 ->
+        [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
-        [{netlink,error,[],_,_,{ErrNo, _}}|_] ->
+        [{netlink, error, [], _, _, {ErrNo, _}}|_] ->
           {error, ErrNo};
         [Msg|_] ->
           {error, Msg};
@@ -197,20 +197,20 @@ do_mapping(Mapping, Socket) ->
   Seq = erlang:time_offset() + erlang:monotonic_time(),
   Cmd = {inet, 0, 0, [
     {tuple_orig,
-      [{ip,[{v4_src,Mapping#mapping.orig_src_ip},{v4_dst,Mapping#mapping.orig_dst_ip}]},
-        {proto,[{num,tcp},{src_port,Mapping#mapping.orig_src_port},{dst_port,Mapping#mapping.orig_dst_port}]}]},
+      [{ip, [{v4_src, Mapping#mapping.orig_src_ip}, {v4_dst, Mapping#mapping.orig_dst_ip}]},
+        {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_src_port}, {dst_port, Mapping#mapping.orig_dst_port}]}]},
     {tuple_reply,
-      [{ip,[{v4_src,Mapping#mapping.orig_dst_ip},{v4_dst,Mapping#mapping.orig_src_ip}]},
-        {proto,[{num,tcp},{src_port,Mapping#mapping.orig_dst_port},{dst_port,Mapping#mapping.orig_src_port}]}]},
-    {timeout,100},
-    {protoinfo,[{tcp,[{state,syn_sent}]}]},
+      [{ip, [{v4_src, Mapping#mapping.orig_dst_ip}, {v4_dst, Mapping#mapping.orig_src_ip}]},
+        {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_dst_port}, {dst_port, Mapping#mapping.orig_src_port}]}]},
+    {timeout, 100},
+    {protoinfo, [{tcp, [{state, syn_sent}]}]},
     {nat_src,
-      [{v4_src,Mapping#mapping.new_src_ip},
-        {src_port,[{min_port,Mapping#mapping.new_src_port},{max_port,Mapping#mapping.new_src_port}]}]},
+      [{v4_src, Mapping#mapping.new_src_ip},
+        {src_port, [{min_port, Mapping#mapping.new_src_port}, {max_port, Mapping#mapping.new_src_port}]}]},
     {nat_dst,
-      [{v4_dst,Mapping#mapping.new_dst_ip},
-        {dst_port,[{min_port,Mapping#mapping.new_dst_port},{max_port,Mapping#mapping.new_dst_port}]}]}
+      [{v4_dst, Mapping#mapping.new_dst_ip},
+        {dst_port, [{min_port, Mapping#mapping.new_dst_port}, {max_port, Mapping#mapping.new_dst_port}]}]}
   ]},
-  Msg = [#ctnetlink{type = new, flags = [create,excl,ack,request], seq = Seq, pid = 0, msg = Cmd}],
+  Msg = [#ctnetlink{type = new, flags = [create, excl, ack, request], seq = Seq, pid = 0, msg = Cmd}],
   Status = nfnl_query(Socket, Msg),
   lager:debug("Mapping Status: ~p", [Status]).

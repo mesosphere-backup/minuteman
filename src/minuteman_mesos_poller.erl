@@ -182,7 +182,11 @@ handle_response(_) ->
   {error, http_error}.
 framework_fold(#{tasks := Tasks}, AccIn) ->
   lists:foldl(fun task_fold/2, AccIn, Tasks).
-task_fold(_Task = #{labels := Labels, resources  := #{ports := Ports}, statuses := UnsortedStatuses, state := <<"TASK_RUNNING">>}, AccIn) ->
+task_fold(_Task = #{
+            labels := Labels,
+            resources  := #{ports := Ports},
+            statuses := UnsortedStatuses,
+            state := <<"TASK_RUNNING">>}, AccIn) ->
   [Status|_] = lists:reverse(UnsortedStatuses),
   #{container_status := ContainerStatus} = Status,
   #{network_infos := [NetworkInfo]} = ContainerStatus,
