@@ -23,7 +23,8 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {rest_for_one, 5, 10}, [?CHILD(minuteman_ipsets, worker),
+    {ok, { {one_for_one, 5, 10}, [
+        ?CHILD(minuteman_ipsets, worker),
         ?CHILD(minuteman_vip_server, worker),
         ?CHILD(minuteman_mesos_poller, worker),
         ?CHILD(minuteman_network_sup, supervisor)
