@@ -30,8 +30,10 @@
   "nfnetlink_queue","nfnetlink","nf_nat_masquerade_ipv4","nf_conntrack_ipv4",
   "nf_defrag_ipv4","nf_nat_ipv4","nf_nat","nf_conntrack", "iptable_nat", "ipt_MASQUERADE"]).
 -define(RULES, [
-  {raw, output, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
-  {raw, prerouting, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
+  {raw, output, "-p tcp -m set --match-set minuteman dst,dst -m tcp "++
+                "--tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
+  {raw, prerouting, "-p tcp -m set --match-set minuteman dst,dst -m tcp "++
+                    "--tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
   {filter, output, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"},
   {filter, forward, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"}
 ]).
@@ -194,25 +196,29 @@ code_change(_OldVsn, State, _Extra) ->
 
 setup_iptables() ->
   lists:foreach(fun(Module) -> os:cmd(lists:flatten(io_lib:format("modprobe ~s", [Module]))) end, ?MODULES),
-    %"-t raw -%s OUTPUT -p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num"
-    %"-t raw -%s PREROUTING -p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num"
-    %"-t filter -%s OUTPUT -p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"
-    %"-t filter -%s FORWARD -p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"
+    %"-t raw -%s OUTPUT -p tcp -m set
+    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num"
+    %"-t raw -%s PREROUTING -p tcp -m set
+    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num"
+    %"-t filter -%s OUTPUT -p tcp -m set
+    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"
+    %"-t filter -%s FORWARD -p tcp -m set
+    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"
   lists:foreach(fun load_rule/1, ?RULES).
 load_rule({Table, Chain, Rule}) ->
   Rule1 = re:replace(Rule, "QUEUE_NUMBER", integer_to_list(minuteman_config:queue()),  [global, {return, list}]),
   case iptables:check(Table, Chain, Rule1) of
-    {ok,[]} ->
+    {ok, []} ->
       ok;
     _ ->
       lager:debug("Loading rule: ~p", [Rule1]),
-      {ok,[]} = iptables:insert(Table, Chain, Rule1)
+      {ok, []} = iptables:insert(Table, Chain, Rule1)
   end.
 
 
 build_send_cfg_msg(Socket, Command, Queue, Pf) ->
   Cmd = {cmd, Command, Pf},
-  Msg = {queue, config, [ack,request], 0, 0, {unspec, 0, Queue, [Cmd]}},
+  Msg = {queue, config, [ack, request], 0, 0, {unspec, 0, Queue, [Cmd]}},
   nfnl_query(Socket, Msg).
 
 
@@ -225,9 +231,9 @@ nfnl_query(Socket, Query) ->
     {ok, Reply} ->
       lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
-        [{netlink,error,[],_,_,{ErrNo, _}}|_] when ErrNo == 0 ->
+        [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
-        [{netlink,error,[],_,_,{ErrNo, _}}|_] ->
+        [{netlink, error, [], _, _, {ErrNo, _}}|_] ->
           {error, ErrNo};
         [Msg|_] ->
           {error, Msg};
@@ -258,12 +264,12 @@ nfq_create_queue(Socket, Queue) ->
 
 nfq_set_mode(Socket, Queue, CopyMode, CopyLen) ->
   Cmd = {params, CopyLen, CopyMode},
-  Msg = {queue, config, [ack,request], 0, 0, {unspec, 0, Queue, [Cmd]}},
+  Msg = {queue, config, [ack, request], 0, 0, {unspec, 0, Queue, [Cmd]}},
   nfnl_query(Socket, Msg).
 
 nfq_set_flags(Socket, Queue, Flags, Mask) ->
   Cmd = [{mask, Mask}, {flags, Flags}],
-  Msg = {queue, config, [ack,request], 0, 0, {unspec, 0, Queue, Cmd}},
+  Msg = {queue, config, [ack, request], 0, 0, {unspec, 0, Queue, Cmd}},
   nfnl_query(Socket, Msg).
 
 
@@ -278,7 +284,8 @@ process_nfq_msgs([Msg|Rest], State) ->
 process_nfq_msg({queue, packet, _Flags, _Seq, _Pid, Packet}, State) ->
   process_nfq_packet(Packet, State).
 
-process_nfq_packet({Family, _Version, _Queue, Info}, _State = #state{socket = Socket, queue = Queue}) when Family == inet; Family == inet6 ->
+process_nfq_packet({Family, _Version, _Queue, Info}, _State = #state{socket = Socket, queue = Queue})
+  when Family == inet; Family == inet6 ->
   handle_packet(Info),
   {_, Id, _, _} = lists:keyfind(packet_hdr, 1, Info),
   lager:debug("Verdict for ~p~n", [Id]),

@@ -179,7 +179,7 @@ do_handle(Payload) ->
       SrcPort = TCP#tcp.sport,
       NewSrcAddr = case {is_local(SrcAddr), is_local(BackendIP)} of
                    {true, true} ->
-                     {127,0,0,1};
+                     {127, 0, 0, 1};
                    _ ->
                      SrcAddr
       end,

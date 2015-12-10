@@ -31,4 +31,8 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-  {ok, { {one_for_one, 5, 10}, [?CHILD(minuteman_ct, worker), ?CHILD(minuteman_packet_handler, worker), ?CHILD(minuteman_nfq, worker)]} }.
+  {ok,
+   { {one_for_one, 5, 10},
+     [?CHILD(minuteman_ct, worker),
+      ?CHILD(minuteman_packet_handler, worker),
+      ?CHILD(minuteman_nfq, worker)]} }.
