@@ -62,6 +62,8 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  %% Clear the VIP state
+  handle_push_vips([]),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
