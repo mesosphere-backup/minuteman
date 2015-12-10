@@ -10,7 +10,6 @@
                   inets,
                   pkt,
                   gen_netlink,
-                  iptables,
                   jsx,
                   gen_socket
                  ]},
