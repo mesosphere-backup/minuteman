@@ -24,7 +24,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {vips}).
+-record(state, {vips = orddict:new()}).
 
 %% Debug
 -export([poll/0]).
@@ -63,8 +63,8 @@ start_link() ->
   {stop, Reason :: term()} | ignore).
 init([]) ->
   ok = timer:start(),
-  {ok, Vips} = poll(),
-  {ok, #state{vips = Vips}}.
+  {ok, _} = timer:send_after(minuteman_config:poll_interval(), poll),
+  {ok, #state{}}.
 
 %%--------------------------------------------------------------------
 %% @private
