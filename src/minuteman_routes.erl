@@ -4,15 +4,16 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 09. Dec 2015 1:36 AM
+%%% Created : 11. Dec 2015 10:57 AM
 %%%-------------------------------------------------------------------
--module(minuteman_packet_handler).
+-module(minuteman_routes).
 -author("sdhillon").
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, handle/1]).
+-export([start_link/0,
+  get_route/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -22,28 +23,40 @@
   terminate/2,
   code_change/3]).
 
--include_lib("pkt/include/pkt.hrl").
 
--include_lib("kernel/include/inet.hrl").
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
--include("enfhackery.hrl").
+-include_lib("gen_socket/include/gen_socket.hrl").
+-include_lib("gen_netlink/include/netlink.hrl").
 -define(SERVER, ?MODULE).
 
--record(state, {socket}).
+-record(state, {socket :: gen_socket:socket()}).
+%% TODO: define a route,
+%% They look roughly like:
+%[{dst,{8,8,8,8}},
+%{oif,2},
+%{prefsrc,{10,0,2,15}},
+%{gateway,{10,0,2,2}}]
+% Treat it as a proplist, not an ordict
+-type(route() :: [term()]).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
-handle(Payload) ->
-  catch gen_server:call(?SERVER, {handle_payload, Payload}).
+-spec(get_route(Addr :: inet:ip4_address()) -> {ok, Route :: route()} | {error, Reason :: term()}).
+get_route(Addr) when is_tuple(Addr) ->
+  gen_server:call(?SERVER, {get_route, Addr}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link() -> {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
+-spec(start_link() ->
+  {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
   gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
@@ -66,7 +79,14 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  {ok, #state{}}.
+  %% TODO: Return error, don't just bail
+  {unix, linux} = os:type(),
+  {ok, Socket} = socket(netlink, raw, ?NETLINK_ROUTE, []),
+  %% Our fates are linked.
+  {gen_socket, RealPort, _, _, _, _} = Socket,
+  erlang:link(RealPort),
+  ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
+  {ok, #state{socket = Socket}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -83,9 +103,10 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({handle_payload, Payload}, _From, State) ->
-  do_handle(Payload),
-  {reply, ok, State};
+%% TODO: Caching.
+handle_call({get_route, Addr}, _From, State = #state{socket = Socket}) ->
+  Reply = handle_get_route(Addr, Socket),
+  {reply, Reply, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -133,7 +154,8 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
   State :: #state{}) -> term()).
-terminate(_Reason, _State) ->
+terminate(_Reason, _State = #state{socket = Socket}) ->
+  gen_socket:close(Socket),
   ok.
 
 %%--------------------------------------------------------------------
@@ -154,58 +176,83 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-is_local(IP) ->
-  {ok, Addresses} = inet:getifaddrs(),
-  is_local(IP, Addresses).
-is_local(_IP, []) ->
-  false;
-is_local(IP, [{_Ifname, Ifopt}|Interfaces]) ->
-  Addrs = [Addr ||{addr, Addr} <- Ifopt],
-  case lists:member(IP, Addrs) of
-    true ->
-      true;
-    false ->
-      is_local(IP, Interfaces)
+
+%% This NFNL query function isn't like the others.
+%% It uses the nl_rt_dec / nl_rt_enc
+%% NOT the:    nl_ct_dec / nl_ct_dec
+%% The difference is rt netlink, versus conntrack decoding
+nfnl_query(Socket, Query) ->
+  Request = netlink:nl_rt_enc(Query),
+  gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
+  Answer = gen_socket:recv(Socket, 8192),
+  lager:debug("Answer: ~p~n", [Answer]),
+  case Answer of
+    {ok, Reply} ->
+      lager:debug("Reply: ~p~n", [netlink:nl_rt_dec(Reply)]),
+      netlink:nl_rt_dec(Reply);
+    Other ->
+      Other
   end.
 
-get_src_addr(SrcAddr, BackendIP) ->
-  case {is_local(SrcAddr), is_local(BackendIP)} of
-    {true, true} ->
-      {127, 0, 0, 1};
-    {true, false} ->
-      SrcAddr;
-    {false, true} ->
-      SrcAddr;
-    {false, false} ->
-      {ok, Route} = minuteman_routes:get_route(BackendIP),
-      %% TODO: Add validation here
-      %% TODO: Fallback to another IP
-      PrefSrc = proplists:get_value(prefsrc, Route),
-      PrefSrc
+
+socket(Family, Type, Protocol, Opts) ->
+  case proplists:get_value(netns, Opts) of
+    undefined ->
+      gen_socket:socket(Family, Type, Protocol);
+    NetNs ->
+      gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
-do_handle(Payload) ->
-  [IP, TCP|_] = pkt:decapsulate(ipv4, Payload),
-  DstAddr = IP#ipv4.daddr,
-  DstPort = TCP#tcp.dport,
-  case minuteman_vip_server:get_backend(DstAddr, DstPort) of
-    {ok, Backend = {BackendIP, BackendPort}} ->
-      lager:debug("Backend: ~p", [Backend]),
-      SrcAddr = IP#ipv4.saddr,
-      SrcPort = TCP#tcp.sport,
-      NewSrcAddr = get_src_addr(SrcAddr, BackendIP),
-      Mapping = #mapping{orig_src_ip = SrcAddr,
-        orig_src_port = SrcPort,
-        orig_dst_ip = DstAddr,
-        orig_dst_port = DstPort,
-        new_src_ip = NewSrcAddr,
-        new_src_port = SrcPort - 31743,
-        new_dst_ip = BackendIP,
-        new_dst_port = BackendPort},
 
-      lager:info("Mapping: ~p", [Mapping]),
-      minuteman_ct:handle_mapping(Mapping);
+-spec(handle_get_route(Addr :: inet:ip4_address(), Socket :: gen_socket:socket()) ->
+  {ok, Route :: route} | {error, Reason :: term()}).
+handle_get_route(Addr, Socket) when is_tuple(Addr) ->
+  Seq = erlang:time_offset() + erlang:monotonic_time(),
+  Req = [{dst, Addr}],
+  Family = inet,
+  DstLen = 0,
+  SrcLen = 0,
+  Tos = 0,
+  Table = main,
+  Protocol = unspec, %% This is the routing protocol, like: static, zebra, etc...
+  Scope = universe,
+  RtmType = unicast,
+  Flags = [],
+  Msg = {Family, DstLen, SrcLen, Tos, Table, Protocol, Scope, RtmType, Flags, Req},
+  Query = [#rtnetlink{type = getroute, flags=[request], seq = Seq, pid = 0, msg = Msg}],
+  handle_nfnl_response(nfnl_query(Socket, Query)).
 
+handle_nfnl_response({error, Msg}) ->
+  {error, Msg};
+
+handle_nfnl_response([#rtnetlink{type = newroute,
+  msg = {inet = _Family, _DstLen, _SrcLen, _Tos, _Table, _Protocol, _Scope, _RtmType, _Flags, Res}}]) ->
+  {ok, Res};
+handle_nfnl_response(Res) ->
+  lager:debug("Unknown response: ~p", [Res]),
+  {error, unknown}.
+
+
+
+-ifdef(TEST).
+basic_test() ->
+  case os:type() of
+    {unix, linux} ->
+      basic_test_real();
     _ ->
-      lager:debug("Could not map connection")
+      ?debugMsg("Unsupported OS")
   end.
+basic_test_real() ->
+  {ok, State} = init([]),
+  Response = handle_get_route({8, 8, 8, 8}, State#state.socket),
+  ?assertNotEqual(proplists:get_value(prefsrc, Response, undefined), undefined),
+  ?assertNotEqual(proplists:get_value(gateway, Response, undefined), undefined).
+
+-endif.
+
+
+
+
+
+
+
 
