@@ -223,14 +223,14 @@ label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
 label_to_offset_vip(_) ->
   [].
 
-status_to_ips(Status) ->
-  #{container_status := ContainerStatus} = Status,
-  #{network_infos := NetworkInfos} = ContainerStatus,
+status_to_ips(_Status = #{container_status := #{network_infos := NetworkInfos}}) ->
   lists:map(fun(NetworkInfo) ->
               #{ip_address := IPAddressBin} = NetworkInfo,
               {ok, IPAddress} = inet:parse_ipv4_address(binary_to_list(IPAddressBin)),
               IPAddress
-            end, NetworkInfos).
+            end, NetworkInfos);
+status_to_ips(_) ->
+  [].
 
 parse_ports(Ports) ->
   %% Denormalize the ports
