@@ -157,7 +157,7 @@ code_change(_OldVsn, State, _Extra) ->
 is_local(IP) ->
   {ok, Addresses} = inet:getifaddrs(),
   is_local(IP, Addresses).
-is_local(IP, []) ->
+is_local(_IP, []) ->
   false;
 is_local(IP, [{_Ifname, Ifopt}|Interfaces]) ->
   Addrs = [Addr ||{addr, Addr} <- Ifopt],
@@ -168,6 +168,21 @@ is_local(IP, [{_Ifname, Ifopt}|Interfaces]) ->
       is_local(IP, Interfaces)
   end.
 
+get_src_addr(SrcAddr, BackendIP) ->
+  case {is_local(SrcAddr), is_local(BackendIP)} of
+    {true, true} ->
+      {127, 0, 0, 1};
+    {true, false} ->
+      SrcAddr;
+    {false, true} ->
+      SrcAddr;
+    {false, false} ->
+      {ok, Route} = minuteman_routes:get_route(BackendIP),
+      %% TODO: Add validation here
+      %% TODO: Fallback to another IP
+      PrefSrc = proplists:get_value(prefsrc, Route),
+      PrefSrc
+  end.
 do_handle(Payload) ->
   [IP, TCP|_] = pkt:decapsulate(ipv4, Payload),
   DstAddr = IP#ipv4.daddr,
@@ -177,12 +192,7 @@ do_handle(Payload) ->
       lager:debug("Backend: ~p", [Backend]),
       SrcAddr = IP#ipv4.saddr,
       SrcPort = TCP#tcp.sport,
-      NewSrcAddr = case {is_local(SrcAddr), is_local(BackendIP)} of
-                   {true, true} ->
-                     {127, 0, 0, 1};
-                   _ ->
-                     SrcAddr
-      end,
+      NewSrcAddr = get_src_addr(SrcAddr, BackendIP),
       Mapping = #mapping{orig_src_ip = SrcAddr,
         orig_src_port = SrcPort,
         orig_dst_ip = DstAddr,
