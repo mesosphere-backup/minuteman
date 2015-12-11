@@ -201,7 +201,7 @@ task_fold(_Task = #{
     true ->
       IPs = status_to_ips(Status),
       PortList = parse_ports(Ports),
-      OffsetVIPs = lists:flatmap(fun(L) -> label_to_offset_vip(L) end, Labels),
+      OffsetVIPs = lists:flatmap(fun label_to_offset_vip/1, Labels),
       PortVIPs = lists:map(fun ({Offset, VIP}) ->
                              Port = lists:nth(Offset + 1, PortList),
                              {Port, VIP}
@@ -240,7 +240,8 @@ parse_ports(Ports) ->
   BeginEnds = string:tokens(PortsStr2, ", "),
   ListOfRangeStrs = [string:tokens(Range, "-") || Range <- BeginEnds],
   %% ASSUMPTION: small port ranges
-  ListOfLists = [lists:seq(string_to_integer(Begin), string_to_integer(End)) || [Begin, End] <- ListOfRangeStrs],
+  ListOfLists = [lists:seq(string_to_integer(Begin), string_to_integer(End))
+                 || [Begin, End] <- ListOfRangeStrs],
   lists:flatten(ListOfLists).
 
 string_to_integer(Str) ->
