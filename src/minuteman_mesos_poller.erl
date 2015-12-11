@@ -182,33 +182,56 @@ handle_response(_) ->
   {error, http_error}.
 framework_fold(#{tasks := Tasks}, AccIn) ->
   lists:foldl(fun task_fold/2, AccIn, Tasks).
+
+
+% need to fix:
+%   1. multiple network infos
+%   3. ip address failing to parse
+%   4. what happens with lists that don't match [Begin, End]? crash or silent drop?
+%   5. string_to_integer result for ports, should just use underlying string:to_integer directly and check for error
+%   6. list_to_integer result for port index
+%   7. lists:nth is actually a real index in the PortsInts
+%   8. PortsInts expected to be a list containing every port?
+%   9. normalize_vip assumes tcp://
+%   10. normalize_vip assumes good parse
+%   11. sort status by timestamp
+task_fold(_Task = #{statuses := []}, AccIn) ->
+  AccIn;
 task_fold(_Task = #{
             labels := Labels,
             resources  := #{ports := Ports},
             statuses := UnsortedStatuses,
             state := <<"TASK_RUNNING">>}, AccIn) ->
-  [Status|_] = lists:reverse(UnsortedStatuses),
-  #{container_status := ContainerStatus} = Status,
-  #{network_infos := [NetworkInfo]} = ContainerStatus,
-  #{ip_address := IPAddressBin} = NetworkInfo,
-  {ok, IPAddress} = inet:parse_ipv4_address(binary_to_list(IPAddressBin)),
-  %% Denormalize the ports
-  PortsStr = erlang:binary_to_list(Ports),
-  PortsStr1 = string:strip(PortsStr, left, $[),
-  PortsStr2 = string:strip(PortsStr1, right, $]),
-  BeginEnds = string:tokens(PortsStr2, ", "),
-  ListOfRangeStrs = [string:tokens(Range, "-") || Range <- BeginEnds],
-  ListOfLists = [lists:seq(string_to_integer(Begin), string_to_integer(End)) || [Begin, End] <- ListOfRangeStrs],
-  PortsInts = lists:flatten(ListOfLists),
-  %% Now iterate through the labels and fetch the relevant ports
-  Fun = fun(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}, AccIn2) ->
-    Offset = list_to_integer(binary_to_list(PortNum)),
-    Portnumber = lists:nth(Offset + 1, PortsInts),
-    orddict:append_list(normalize_vip(VIP), [{IPAddress, Portnumber}], AccIn2);
-    (_, AccIn2) ->
-      AccIn2
-        end,
-  lists:foldl(Fun, AccIn, Labels);
+  % we only care about the most recent status
+  SortFun = fun(A, B) -> maps:get(timestamp, A) > maps:get(timestamp, B) end,
+  [Status|_] = lists:sort(SortFun, UnsortedStatuses),
+  % to be compatible with mesos versions below 0.26, assume true if unspecified
+  case maps:get(healthy, Status, true) of
+    false ->
+      AccIn;
+    true ->
+      #{container_status := ContainerStatus} = Status,
+      #{network_infos := [NetworkInfo]} = ContainerStatus,
+      #{ip_address := IPAddressBin} = NetworkInfo,
+      {ok, IPAddress} = inet:parse_ipv4_address(binary_to_list(IPAddressBin)),
+      %% Denormalize the ports
+      PortsStr = erlang:binary_to_list(Ports),
+      PortsStr1 = string:strip(PortsStr, left, $[),
+      PortsStr2 = string:strip(PortsStr1, right, $]),
+      BeginEnds = string:tokens(PortsStr2, ", "),
+      ListOfRangeStrs = [string:tokens(Range, "-") || Range <- BeginEnds],
+      ListOfLists = [lists:seq(string_to_integer(Begin), string_to_integer(End)) || [Begin, End] <- ListOfRangeStrs],
+      PortsInts = lists:flatten(ListOfLists),
+      %% Now iterate through the labels and fetch the relevant ports
+      Fun = fun(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}, AccIn2) ->
+              Offset = list_to_integer(binary_to_list(PortNum)),
+              Portnumber = lists:nth(Offset + 1, PortsInts),
+              orddict:append_list(normalize_vip(VIP), [{IPAddress, Portnumber}], AccIn2);
+              (_, AccIn2) ->
+                AccIn2
+            end,
+      lists:foldl(Fun, AccIn, Labels)
+  end;
 task_fold(_, AccIn) ->
   AccIn.
 
