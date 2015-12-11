@@ -140,7 +140,8 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
   State :: #state{}) -> term()).
-terminate(_Reason, _State) ->
+terminate(_Reason, _State = #state{socket = Socket}) ->
+  gen_socket:close(Socket),
   ok.
 
 %%--------------------------------------------------------------------
