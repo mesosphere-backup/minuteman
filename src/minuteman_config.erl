@@ -10,7 +10,7 @@
 -author("sdhillon").
 
 %% API
--export([master_uri/0, poll_interval/0, queue/0]).
+-export([master_uri/0, poll_interval/0, queue/0, networking/0]).
 
 
 master_uri() ->
@@ -23,3 +23,6 @@ poll_interval() ->
 %% Returns a integer
 queue() ->
   application:get_env(minuteman, queue, 0).
+
+networking() ->
+  application:get_env(minuteman, enable_networking, true).

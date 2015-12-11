@@ -22,10 +22,27 @@ start_link() ->
 %% Supervisor callbacks
 %% ===================================================================
 
-init([]) ->
-    {ok, { {rest_for_one, 5, 10}, [?CHILD(minuteman_ipsets, worker),
+
+maybe_add_network_child(Children) ->
+    case minuteman_config:networking() of
+        true ->
+            [?CHILD(minuteman_network_sup, supervisor)|Children];
+        false ->
+            Children
+    end.
+add_default_children(Children) ->
+    [
+        ?CHILD(minuteman_ipsets, worker),
         ?CHILD(minuteman_vip_server, worker),
-        ?CHILD(minuteman_mesos_poller, worker),
-        ?CHILD(minuteman_network_sup, supervisor)
-    ]} }.
+        ?CHILD(minuteman_mesos_poller, worker)|
+        Children
+    ].
+get_children() ->
+    Children1 = maybe_add_network_child([]),
+    Children2 = add_default_children(Children1),
+    Children2.
+
+init([]) ->
+    Children =
+    {ok, { {one_for_one, 5, 10}, get_children()} }.
 

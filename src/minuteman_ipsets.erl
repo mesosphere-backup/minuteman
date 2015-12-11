@@ -82,7 +82,7 @@ init([]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call({push_vips, Vips}, _From, State) ->
-  handle_push_vips(Vips),
+  maybe_handle_push_vips(Vips),
   {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -151,7 +151,13 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
+maybe_handle_push_vips(Vips) ->
+  case minuteman_config:networking() of
+    true ->
+      handle_push_vips(Vips);
+    false ->
+      ok
+  end.
 handle_push_vips(Vips) ->
   ensure_main_ipset_created(),
   ensure_temp_ipset_destroyed(),
