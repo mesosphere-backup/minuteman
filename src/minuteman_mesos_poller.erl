@@ -188,11 +188,10 @@ task_fold(_Task = #{statuses := []}, AccIn) ->
 task_fold(_Task = #{
             labels := Labels,
             resources  := #{ports := Ports},
-            statuses := UnsortedStatuses,
+            statuses := Statuses,
             state := <<"TASK_RUNNING">>}, AccIn) ->
-  %% we only care about the most recent status
-  RecentTimestampSortFun = fun(A, B) -> maps:get(timestamp, A) > maps:get(timestamp, B) end,
-  [Status|_] = lists:sort(RecentTimestampSortFun, UnsortedStatuses),
+  %% we only care about the most recent status, which will be the last in the list
+  [Status|_] = lists:reverse(Statuses),
 
   %% to be compatible with mesos versions below 0.26, assume true if unspecified
   case maps:get(healthy, Status, true) of
