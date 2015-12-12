@@ -22,9 +22,14 @@
   terminate/2,
   code_change/3]).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -define(SERVER, ?MODULE).
 
 -record(state, {vips = orddict:new()}).
+
 
 %% Debug
 -export([poll/0]).
@@ -178,7 +183,8 @@ handle_response({ok, {{_HttpVersion, 200, _ReasonPhrase}, _Headers, Body}}) ->
   #{frameworks := Frameworks} = Data,
   Vips = lists:foldl(fun framework_fold/2, orddict:new(), Frameworks),
   {ok, Vips};
-handle_response(_) ->
+handle_response(Response) ->
+  lager:debug("Bad HTTP Response: ~p", [Response]),
   {error, http_error}.
 framework_fold(#{tasks := Tasks}, AccIn) ->
   lists:foldl(fun task_fold/2, AccIn, Tasks).

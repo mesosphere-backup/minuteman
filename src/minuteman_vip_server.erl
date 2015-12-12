@@ -24,7 +24,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {vips = dict:new()}).
+-record(state, {vips = dict:new(), vip_counter = dict:new()}).
 
 %%%===================================================================
 %%% API
@@ -86,7 +86,7 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips}) ->
+handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips, vip_counter = VIPCounter}) ->
   lager:debug("Looking up VIP: ~p:~p", [IP, Port]),
   %% We assume, and only support tcp right now
   case dict:find({tcp, IP, Port}, Vips) of
@@ -94,9 +94,11 @@ handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips}) ->
       %% This should never happen, but it's better than crashing
       {reply, error, State};
     {ok, Value} ->
-      Offset = random:uniform(erlang:length(Value)),
+      VIPCounter1 = dict:update_counter({tcp, IP, Port}, 1, VIPCounter),
+      Counter = dict:fetch({tcp, IP, Port}, VIPCounter1),
+      Offset = (Counter rem erlang:length(Value)) + 1,
       Backend = lists:nth(Offset, Value),
-      {reply, {ok, Backend}, State};
+      {reply, {ok, Backend}, State#state{vip_counter = VIPCounter1}};
     error ->
       {reply, error, State}
   end;

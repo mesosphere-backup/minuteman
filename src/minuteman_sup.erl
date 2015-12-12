@@ -43,6 +43,5 @@ get_children() ->
     Children2.
 
 init([]) ->
-    Children =
     {ok, { {one_for_one, 5, 10}, get_children()} }.
 
