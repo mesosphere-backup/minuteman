@@ -5,3 +5,4 @@ ebin
 rel/minuteman/
 *.swp
 *.swo
+app.config
