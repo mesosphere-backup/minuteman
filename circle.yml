@@ -1,6 +1,4 @@
 machine:
-  pre:
-    - ip addr add 127.0.0.2/32 dev lo
   environment:
     PATH: ${HOME}/extras/bin:${HOME}/extras/otp/18.1/bin:${PATH}
 dependencies:
