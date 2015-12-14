@@ -243,7 +243,7 @@ basic_test() ->
   end.
 basic_test_real() ->
   {ok, State} = init([]),
-  Response = handle_get_route({8, 8, 8, 8}, State#state.socket),
+  {ok, Response} = handle_get_route({8, 8, 8, 8}, State#state.socket),
   ?assertNotEqual(proplists:get_value(prefsrc, Response, undefined), undefined),
   ?assertNotEqual(proplists:get_value(gateway, Response, undefined), undefined).
 

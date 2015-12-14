@@ -22,6 +22,11 @@
   terminate/2,
   code_change/3]).
 
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -include_lib("pkt/include/pkt.hrl").
 
 -include_lib("kernel/include/inet.hrl").
@@ -209,3 +214,12 @@ do_handle(Payload) ->
       lager:debug("Could not map connection")
   end.
 
+
+
+-ifdef(TEST).
+is_local_test() ->
+  ?assertEqual(true, is_local({127,0,0,1})),
+  ?assertEqual(false, is_local({8,8,8,8})).
+get_src_addr_test() ->
+  ?assertEqual({127,0,0,1}, get_src_addr({127,0,0,1}, {127,0,0,1})).
+-endif.
