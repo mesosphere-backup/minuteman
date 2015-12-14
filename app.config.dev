@@ -1,0 +1,23 @@
+[
+  {minuteman,
+    [
+      {master_uri, "http://33.33.33.2:5050/state.json"},
+      {enable_networking, true}
+    ]
+  },
+  {lager,
+    [
+      {handlers,
+        [
+          {lager_console_backend, debug}
+        ]
+      }
+    ]
+  },
+  {kernel,
+    [
+      {start_pg2, true},
+      {start_timer, true}
+    ]
+  }
+].
