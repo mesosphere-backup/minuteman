@@ -1,0 +1,19 @@
+machine:
+  pre:
+    - ip addr add 127.0.0.2/32 dev lo
+  environment:
+    PATH: ${HOME}/extras/bin:${HOME}/extras/otp/18.1/bin:${PATH}
+dependencies:
+  cache_directories:
+    - ~/extras
+  pre:
+    - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
+    - if [ ! -d ~/extras/otp/18.1 ]; then ./kerl build 18.1 18.1; ./kerl install 18.1 ~/extras/otp/18.1; fi
+  override:
+    - ./rebar get-deps
+test:
+  override:
+    - ./rebar compile
+    - ./rebar eunit skip_deps=true
+  post:
+    - mv .eunit/*.xml $CIRCLE_TEST_REPORTS
