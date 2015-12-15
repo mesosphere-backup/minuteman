@@ -220,10 +220,17 @@ vip_permutations(Status, Ports, Labels, AccIn) ->
   IPs = status_to_ips(Status),
   PortList = parse_ports(Ports),
   OffsetVIPs = lists:flatmap(fun label_to_offset_vip/1, Labels),
-  PortVIPs = lists:map(fun ({Offset, VIP}) ->
-                         Port = lists:nth(Offset + 1, PortList),
-                         {Port, VIP}
-                       end, OffsetVIPs),
+  PortVIPs = lists:flatmap(fun ({Offset, VIP}) ->
+                               case length(PortList) >= Offset + 1 of
+                                 true ->
+                                   Port = lists:nth(Offset + 1, PortList),
+                                   [{Port, VIP}];
+                                 false ->
+                                   lager:warning("Could not parse VIP spec: port index ~p too high for VIP ~p",
+                                                 [Offset, VIP]),
+                                   []
+                               end
+                           end, OffsetVIPs),
   %% Although a task will pretty much always have only one IP,
   %% it's possible for the structure in mesos to have others added,
   %% and we don't want to brittle to this possible future.
@@ -238,8 +245,15 @@ vip_collect(_, AccIn) ->
 
 -spec label_to_offset_vip(label()) -> [tuple()].
 label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
-  {Offset, []} =  string:to_integer(binary_to_list(PortNum)),
-  [{Offset, VIP}];
+  case string:to_integer(binary_to_list(PortNum)) of
+    {Offset, []} -> [{Offset, VIP}];
+    {error, E} ->
+      lager:warning("Could not parse VIP port index from spec ~p: ~p", [PortNum, E]),
+      [];
+    _ ->
+      lager:warning("Could not parse VIP port index from spec ~p", [PortNum]),
+      []
+  end;
 label_to_offset_vip(_) ->
   [].
 
