@@ -307,10 +307,10 @@ parse_host_port_3(Proto, Host, PortStr) ->
 -ifdef(TEST).
 
 proper_test() ->
-	[] = proper:module(?MODULE).
+  [] = proper:module(?MODULE).
 
 prop_valid_states_parse() ->
-	?FORALL(S, mesos_state(), parses(S)).
+  ?FORALL(S, mesos_state(), parses(S)).
 
 parses(S) ->
   {ok, VIPs} = handle_response({ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
@@ -348,9 +348,9 @@ vip_label(NumPorts) ->
 proto() ->
   ?LET(P, union(["tcp", "udp"]), P).
 
-pip() ->
+ip() ->
   measure(thing, 1, thing2),
-  ?LET({I1, I2, I3, I4}, 
+  ?LET({I1, I2, I3, I4},
        {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
        integer_to_list(I1) ++ "." ++
          integer_to_list(I2) ++ "." ++
@@ -358,12 +358,12 @@ pip() ->
          integer_to_list(I4)).
 vip() ->
   ?LET({IP, P},
-       {pip(), integer(0, 65535)},
+       {ip(), integer(0, 65535)},
        IP ++ ":" ++ integer_to_list(P)).
 
 non_vip_label() ->
   ?SUCHTHAT({K, _V}, {binary(), binary()}, not is_vip_label(K)).
-     
+
 is_vip_label(<<"vip_PORT", _Rest>>) ->
   true;
 is_vip_label(_) ->
@@ -382,7 +382,9 @@ resource(NumPorts) ->
 res_ports(NumPorts) ->
   ?LET(Ports,
        ?SUCHTHAT(L, list(integer(0, 65535)), length(L) >= NumPorts),
-       "[" ++ string:join(lists:map(fun (P) -> integer_to_list(P) ++ "-" ++ integer_to_list(P) end, Ports), ",") ++ "]").
+       "[" ++ string:join(lists:map(fun (P) ->
+                                        integer_to_list(P) ++ "-" ++ integer_to_list(P)
+                                    end, Ports), ",") ++ "]").
 
 statuses() ->
   ?LET(S, list(status()), S).
@@ -395,7 +397,7 @@ status() ->
   }).
 
 networkinfo() ->
-  ?LET(IP, pip(), #{ip_address => IP}).
+  ?LET(IP, ip(), #{ip_address => IP}).
 
 taskstate() ->
   ?LET(S, union([<<"TASK_RUNNING">>]), S).
@@ -405,7 +407,9 @@ basic_init_test() ->
   State =:= orddict:new().
 
 label_to_offset_vip_test() ->
-  ?assertEqual([{0,<<"tcp://1.2.3.4:5">>}], label_to_offset_vip(#{key => <<"vip_PORT0">>, value => <<"tcp://1.2.3.4:5">>})),
+  ?assertEqual(
+     [{0, <<"tcp://1.2.3.4:5">>}],
+     label_to_offset_vip(#{key => <<"vip_PORT0">>, value => <<"tcp://1.2.3.4:5">>})),
   ok.
 
 task_fold_test() ->
@@ -415,7 +419,7 @@ task_fold_test() ->
 
 status_to_ips_test() ->
   ?assertEqual([], status_to_ips(#{})),
-  ?assertEqual([{1,2,3,4}], status_to_ips(#{
+  ?assertEqual([{1, 2, 3, 4}], status_to_ips(#{
                      container_status => #{
                        network_infos => [#{ip_address => <<"1.2.3.4">>}]
                      }
@@ -427,18 +431,18 @@ networkinfos_to_ips_test() ->
   ?assertEqual([1], networkinfos_to_ips([], [1])),
   ?assertException(error, {badmatch, _}, networkinfos_to_ips([#{ip_address => <<>>}], [])),
   ?assertException(error, {badmatch, _}, networkinfos_to_ips([#{ip_address => <<"1.a2">>}], [])),
-  ?assertEqual([{1,2,3,4}], networkinfos_to_ips([#{ip_address => <<"1.2.3.4">>}], [])),
+  ?assertEqual([{1, 2, 3, 4}], networkinfos_to_ips([#{ip_address => <<"1.2.3.4">>}], [])),
   ok.
 
 parse_ports_test() ->
   ?assertEqual([], parse_ports(<<>>)),
-  ?assertEqual([1,2], parse_ports(<<"[1-2]">>)),
+  ?assertEqual([1, 2], parse_ports(<<"[1-2]">>)),
   ?assertEqual([1], parse_ports(<<"[1-1]">>)),
   ?assertEqual([], parse_ports(<<"[2-1]">>)),
-  ?assertEqual([1,2], parse_ports(<<"[2-1, 1-2, 1-2]">>)),
-  ?assertEqual([1,2,5], parse_ports(<<"[2-1, 1-2, 5-5]">>)),
-  ?assertEqual([1,2,5], parse_ports(<<"[1-2, 5-5]">>)),
-  ?assertEqual([1,2,5,9,10,11,12,13,14,15], parse_ports(<<"[1-2, 9-15, 5-5]">>)),
+  ?assertEqual([1, 2], parse_ports(<<"[2-1, 1-2, 1-2]">>)),
+  ?assertEqual([1, 2, 5], parse_ports(<<"[2-1, 1-2, 5-5]">>)),
+  ?assertEqual([1, 2, 5], parse_ports(<<"[1-2, 5-5]">>)),
+  ?assertEqual([1, 2, 5, 9, 10, 11, 12, 13, 14, 15], parse_ports(<<"[1-2, 9-15, 5-5]">>)),
   ok.
 
 normalize_vip_test() ->
@@ -450,7 +454,7 @@ normalize_vip_test() ->
   ok.
 
 prop_vips_parse() ->
-	?FORALL(#{value := VIP}, vip_label(0), not_error(normalize_vip(VIP))).
+  ?FORALL(#{value := VIP}, vip_label(0), not_error(normalize_vip(VIP))).
 
 not_error({error, _, _}) ->
   false;
