@@ -10,6 +10,7 @@ dependencies:
     - if [ ! -d ~/extras/otp/18.1 ]; then ./kerl build 18.1 18.1; ./kerl install 18.1 ~/extras/otp/18.1; fi
   override:
     - ./rebar get-deps
+    - ./rebar build-plt
 test:
   override:
     - ./rebar compile
