@@ -5,18 +5,25 @@ dependencies:
   cache_directories:
     - ~/extras
     - ~/.dialyzer_core*
+    - ~/.rebar
+    - .rebar
   pre:
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
     - if [ ! -d ~/extras/otp/18.1 ]; then ./kerl build 18.1 18.1; ./kerl install 18.1 ~/extras/otp/18.1; fi
   override:
     - ./rebar get-deps
     - ./rebar build-plt
+    - dialyzer --plt .rebar/minuteman_18.1_plt --remove_from_plt -r deps/gen_socket/
+    - dialyzer --plt .rebar/minuteman_18.1_plt --remove_from_plt -r deps/gen_netlink/
+
 test:
   override:
     - ./rebar compile
     - ./rebar eunit skip_deps=true
-    - ./rebar build-plt
+    - dialyzer --plt .rebar/minuteman_18.1_plt --add_to_plt ebin/ --verbose
+    - ./rebar xref
     - ./rebar dialyze
+    - ./elvis rock
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv .eunit/*.xml $CIRCLE_TEST_REPORTS

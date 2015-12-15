@@ -32,7 +32,7 @@
 -include_lib("gen_netlink/include/netlink.hrl").
 -define(SERVER, ?MODULE).
 
--record(state, {socket :: gen_socket:socket()}).
+-record(state, {socket = erlang:error() :: gen_socket:socket()}).
 %% TODO: define a route,
 %% They look roughly like:
 %[{dst,{8,8,8,8}},
@@ -81,7 +81,7 @@ start_link() ->
 init([]) ->
   %% TODO: Return error, don't just bail
   {unix, linux} = os:type(),
-  {ok, Socket} = socket(netlink, raw, ?NETLINK_ROUTE, []),
+  {ok, Socket} = gen_socket:socket(netlink, raw, ?NETLINK_ROUTE),
   %% Our fates are linked.
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
@@ -194,14 +194,6 @@ nfnl_query(Socket, Query) ->
       Other
   end.
 
-
-socket(Family, Type, Protocol, Opts) ->
-  case proplists:get_value(netns, Opts) of
-    undefined ->
-      gen_socket:socket(Family, Type, Protocol);
-    NetNs ->
-      gen_socket:socketat(NetNs, Family, Type, Protocol)
-  end.
 
 -spec(handle_get_route(Addr :: inet:ip4_address(), Socket :: gen_socket:socket()) ->
   {ok, Route :: route} | {error, Reason :: term()}).
