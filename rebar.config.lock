@@ -1,0 +1,43 @@
+%% THIS FILE IS GENERATED. DO NOT EDIT IT MANUALLY %%
+
+{plugins,[rebar_lock_deps_plugin]}.
+{erl_opts,[debug_info,{parse_transform,lager_transform}]}.
+{eunit_opts,[verbose,{report,{eunit_surefire,[{dir,"."}]}}]}.
+{cover_enabled,true}.
+{cover_print_enabled,true}.
+{cover_export_enabled,true}.
+{deps,[{goldrush,".*",
+                 {git,"git://github.com/DeadZen/goldrush.git",
+                      "64864ba7fcf40988361340e48680b49a2c2938cf"}},
+       {lager,".*",
+              {git,"git://github.com/basho/lager",
+                   "cbf6679c6a693772fd1629c9cdc093e4c6c4ebf8"}},
+       {gen_socket,".*",
+                   {git,"git://github.com/travelping/gen_socket",
+                        "579f41dbf48520c0fbfc9a37217778b834f8e3cb"}},
+       {flower,".*",
+               {git,"https://github.com/travelping/flower.git",
+                    "549015e8ef6e26d6b4bd10c5e527894e55218168"}},
+       {gen_netlink,".*",
+                    {git,"git@github.com:sargun/gen_netlink.git",
+                         "7bfd7cf1d37ea66e7f289e92c40b3de2be5434b9"}},
+       {sync,".*",
+             {git,"git://github.com/rustyio/sync.git",
+                  "9c78e7b4fe28c75d18ad6971585a204b96e47db1"}},
+       {jsx,".*",
+            {git,"https://github.com/talentdeficit/jsx.git",
+                 "3074d4865b3385a050badf7828ad31490d860df5"}},
+       {pkt,".*",
+            {git,"https://github.com/msantos/pkt",
+                 "f21be7734da7089cec057385d728d1111694671a"}},
+       {meck,".*",
+             {git,"git://github.com/eproxus/meck",
+                  "17b0ea5b7d9c93af3a52b5152c6bee14302b3885"}},
+       {proper,".*",
+               {git,"https://github.com/manopapad/proper.git",
+                    "2b93ff12d8caa8e23e207b04a6aff04bc2d47a63"}},
+       {rebar_lock_deps_plugin,".*",
+                               {git,"git://github.com/seth/rebar_lock_deps_plugin.git",
+                                    "7a5835029c42b8138325405237ea7e8516a84800"}}]}.
+{sub_dirs,["rel"]}.
+
