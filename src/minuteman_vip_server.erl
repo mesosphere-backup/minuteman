@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2015, <COMPANY>
+%%% @author sdhillon, Tyler Neely
+%%% @copyright (C) 2015, Mesosphere
 %%% @doc
 %%%
 %%% @end
@@ -8,11 +8,12 @@
 %%%-------------------------------------------------------------------
 -module(minuteman_vip_server).
 -author("sdhillon").
+-author("Tyler Neely").
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, push_vips/1, get_backend/1, get_backend/2]).
+-export([stop/0, start_link/0, push_vips/1, get_backend/1, get_backend/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -22,9 +23,18 @@
   terminate/2,
   code_change/3]).
 
+-ifdef(TEST).
+-include_lib("proper/include/proper.hrl").
+-include_lib("eunit/include/eunit.hrl").
+-export([initial_state/0, command/1, precondition/2, postcondition/3, next_state/3]).
+-endif.
+
 -define(SERVER, ?MODULE).
 
 -record(state, {vips = dict:new(), vip_counter = dict:new()}).
+
+-type vips() :: dict:dict().
+-type ip_port() :: {tuple(), integer()}.
 
 %%%===================================================================
 %%% API
@@ -39,6 +49,10 @@ push_vips(Vips) ->
   VipDict = dict:from_list(Vips),
   gen_server:cast(?SERVER, {push_vips, VipDict}),
   ok.
+
+stop() ->
+  gen_server:call(?MODULE, stop).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -171,3 +185,54 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+-ifdef(TEST).
+
+proper_test() ->
+  [] = proper:module(?MODULE).
+
+initial_state() ->
+  #state{vips = dict:new(), vip_counter = dict:new()}.
+
+prop_server_works_fine() ->
+    ?FORALL(Cmds, commands(?MODULE),
+            ?TRAPEXIT(
+                begin
+                    ?MODULE:start_link(),
+                    {History, State, Result} = run_commands(?MODULE, Cmds),
+                    ?MODULE:stop(),
+                    ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
+                                        [History, State, Result]),
+                              Result =:= ok)
+                end)).
+
+precondition(_, _) -> true.
+
+postcondition(_, _, _) -> true.
+
+next_state(S, V, {call, _, push_vips, [VIPs]}) ->
+      S#state{vips = VIPs};
+next_state(S, _, _) ->
+  S.
+
+ip() ->
+  ?LET({I1, I2, I3, I4},
+       {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
+       {I1, I2, I3, I4}).
+
+ip_port() ->
+  ?LET({IP, Port},
+       {ip(), integer(0, 65535)},
+       {IP, Port}).
+
+vip() ->
+  ?LET({VIP, Backend}, {ip_port(), ip_port()}, {VIP, Backend}).
+
+vips() ->
+  ?LET(VIPsBackends, list(vip()), lists:foldl(fun({K, V}, Acc) ->
+                                                  orddict:append(K, V, Acc)
+                                              end, orddict:new(), VIPsBackends)).
+command(_S) ->
+    oneof([{call, ?MODULE, get_backend, [ip_port()]},
+           {call, ?MODULE, push_vips, [vips()]}]).
+
+-endif.

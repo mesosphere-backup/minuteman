@@ -38,7 +38,7 @@
 -type task() :: map().
 -type task_status() :: map().
 -type label() :: map().
--type networkinfos() :: map().
+-type network_info() :: map().
 -type vip_string() :: <<_:48, _:_*1>>.
 
 %%%===================================================================
@@ -243,21 +243,19 @@ label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
 label_to_offset_vip(_) ->
   [].
 
--spec status_to_ips(task_status()) -> [pos_integer()].
+-spec status_to_ips(task_status()) -> [inet:ip4_address()].
 status_to_ips(_Status = #{container_status := #{network_infos := NetworkInfos}}) ->
-  networkinfos_to_ips(NetworkInfos, []);
+  network_info_to_ips(NetworkInfos, []);
 status_to_ips(_) ->
   [].
 
--spec networkinfos_to_ips([], []) -> [];
-                         ([], [pos_integer()]) -> [pos_integer()];
-                         ([networkinfos()], []) -> [pos_integer()].
-networkinfos_to_ips([], Acc) ->
+-spec network_info_to_ips([network_info()], [inet:ip4_address()]) -> [inet:ip4_address()].
+network_info_to_ips([], Acc) ->
   Acc;
-networkinfos_to_ips([NetworkInfo|Rest], Acc) ->
+network_info_to_ips([NetworkInfo|Rest], Acc) ->
   #{ip_address := IPAddressBin} = NetworkInfo,
   {ok, IPAddress} = inet:parse_ipv4_address(binary_to_list(IPAddressBin)),
-  networkinfos_to_ips(Rest, [IPAddress|Acc]).
+  network_info_to_ips(Rest, [IPAddress|Acc]).
 
 -spec parse_ports(binary()) -> [pos_integer()].
 parse_ports(Ports) ->
@@ -278,9 +276,7 @@ string_to_integer(Str) ->
   {Int, _Rest} = string:to_integer(Str),
   Int.
 
--spec normalize_vip(vip_string()) -> {tcp, inet:ip_address(), inet:port_number()};
-                   (vip_string()) -> {udp, inet:ip_address(), inet:port_number()};
-                   (vip_string()) -> {error, string()}.
+-spec normalize_vip(vip_string()) -> {tcp | udp, inet:ip4_address(), inet:port_number()} | {error, string()}.
 normalize_vip(<<"tcp://", Rest/binary>>) ->
   parse_host_port(tcp, Rest);
 normalize_vip(<<"udp://", Rest/binary>>) ->
@@ -322,7 +318,7 @@ prop_valid_states_parse() ->
   ?FORALL(S, mesos_state(), parses(S)).
 
 parses(S) ->
-  {ok, VIPs} = handle_response({ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
+  {ok, _} = handle_response({ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
 
 mesos_state() ->
   ?LET(F, list(p_framework()), #{
@@ -358,7 +354,6 @@ p_proto() ->
   ?LET(P, union(["tcp", "udp"]), P).
 
 p_ip() ->
-  measure(thing, 1, thing2),
   ?LET({I1, I2, I3, I4},
        {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
        integer_to_list(I1) ++ "." ++
@@ -399,13 +394,13 @@ p_statuses() ->
   ?LET(S, list(p_status()), S).
 
 p_status() ->
-  ?LET(NI, list(p_networkinfo()), #{
+  ?LET(NI, list(p_network_info()), #{
     container_status => #{
       network_infos => NI
     }
   }).
 
-p_networkinfo() ->
+p_network_info() ->
   ?LET(IP, p_ip(), #{ip_address => IP}).
 
 p_taskstate() ->
@@ -435,12 +430,12 @@ status_to_ips_test() ->
                    })),
   ok.
 
-networkinfos_to_ips_test() ->
-  ?assertEqual([], networkinfos_to_ips([], [])),
-  ?assertEqual([1], networkinfos_to_ips([], [1])),
-  ?assertException(error, {badmatch, _}, networkinfos_to_ips([#{ip_address => <<>>}], [])),
-  ?assertException(error, {badmatch, _}, networkinfos_to_ips([#{ip_address => <<"1.a2">>}], [])),
-  ?assertEqual([{1, 2, 3, 4}], networkinfos_to_ips([#{ip_address => <<"1.2.3.4">>}], [])),
+network_info_to_ips_test() ->
+  ?assertEqual([], network_info_to_ips([], [])),
+  ?assertEqual([1], network_info_to_ips([], [1])),
+  ?assertException(error, {badmatch, _}, network_info_to_ips([#{ip_address => <<>>}], [])),
+  ?assertException(error, {badmatch, _}, network_info_to_ips([#{ip_address => <<"1.a2">>}], [])),
+  ?assertEqual([{1, 2, 3, 4}], network_info_to_ips([#{ip_address => <<"1.2.3.4">>}], [])),
   ok.
 
 parse_ports_test() ->
