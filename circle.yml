@@ -13,6 +13,8 @@ test:
   override:
     - ./rebar compile
     - ./rebar eunit skip_deps=true
+    - ./rebar build-plt
+    - ./rebar dialyze
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv .eunit/*.xml $CIRCLE_TEST_REPORTS
