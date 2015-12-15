@@ -50,7 +50,7 @@ push_vips(Vips) ->
   gen_server:cast(?SERVER, {push_vips, VipDict}),
   ok.
 
-stop() -> 
+stop() ->
   gen_server:call(?MODULE, stop).
 
 %%--------------------------------------------------------------------
@@ -197,11 +197,11 @@ prop_server_works_fine() ->
     ?FORALL(Cmds, commands(?MODULE),
             ?TRAPEXIT(
                 begin
-                    ?SERVER:start_link(),
-                    {History,State,Result} = run_commands(?MODULE, Cmds),
-                    ?SERVER:stop(),
+                    ?MODULE:start_link(),
+                    {History, State, Result} = run_commands(?MODULE, Cmds),
+                    ?MODULE:stop(),
                     ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
-                                        [History,State,Result]),
+                                        [History, State, Result]),
                               Result =:= ok)
                 end)).
 
@@ -209,7 +209,7 @@ precondition(_, _) -> true.
 
 postcondition(_, _, _) -> true.
 
-next_state(S, V, {call,_,push_vips,[VIPs]}) ->
+next_state(S, V, {call, _, push_vips, [VIPs]}) ->
       S#state{vips = VIPs};
 next_state(S, _, _) ->
   S.
@@ -217,22 +217,22 @@ next_state(S, _, _) ->
 ip() ->
   ?LET({I1, I2, I3, I4},
        {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
-			 {I1, I2, I3, I4}).
+       {I1, I2, I3, I4}).
 
 ip_port() ->
   ?LET({IP, Port},
        {ip(), integer(0, 65535)},
-			 {IP, Port}).
+       {IP, Port}).
 
 vip() ->
-	?LET({VIP, Backend}, {ip_port(), ip_port()}, {VIP, Backend}).
+  ?LET({VIP, Backend}, {ip_port(), ip_port()}, {VIP, Backend}).
 
 vips() ->
-	?LET(VIPsBackends, list(vip()), lists:foldl(fun({K, V}, Acc) ->
+  ?LET(VIPsBackends, list(vip()), lists:foldl(fun({K, V}, Acc) ->
                                                   orddict:append(K, V, Acc)
                                               end, orddict:new(), VIPsBackends)).
 command(_S) ->
-    oneof([{call,?MODULE,get_backend,[ip_port()]},
-           {call,?MODULE,push_vips,[vips()]}]).
+    oneof([{call, ?MODULE, get_backend, [ip_port()]},
+           {call, ?MODULE, push_vips, [vips()]}]).
 
 -endif.

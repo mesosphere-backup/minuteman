@@ -243,15 +243,13 @@ label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
 label_to_offset_vip(_) ->
   [].
 
--spec status_to_ips(task_status()) -> [pos_integer()].
+-spec status_to_ips(task_status()) -> [{byte(), byte(), byte(), byte()}].
 status_to_ips(_Status = #{container_status := #{network_infos := NetworkInfos}}) ->
   networkinfos_to_ips(NetworkInfos, []);
 status_to_ips(_) ->
   [].
 
--spec networkinfos_to_ips([], []) -> [];
-                         ([], [pos_integer()]) -> [pos_integer()];
-                         ([networkinfos()], []) -> [pos_integer()].
+-spec networkinfos_to_ips([networkinfos()], [{byte(), byte(), byte(), byte()}]) -> [{byte(), byte(), byte(), byte()}].
 networkinfos_to_ips([], Acc) ->
   Acc;
 networkinfos_to_ips([NetworkInfo|Rest], Acc) ->
@@ -278,9 +276,7 @@ string_to_integer(Str) ->
   {Int, _Rest} = string:to_integer(Str),
   Int.
 
--spec normalize_vip(vip_string()) -> {tcp, inet:ip_address(), inet:port_number()};
-                   (vip_string()) -> {udp, inet:ip_address(), inet:port_number()};
-                   (vip_string()) -> {error, string()}.
+-spec normalize_vip(vip_string()) -> {tcp | udp, inet:ip_address(), inet:port_number()} | {error, string()}.
 normalize_vip(<<"tcp://", Rest/binary>>) ->
   parse_host_port(tcp, Rest);
 normalize_vip(<<"udp://", Rest/binary>>) ->
@@ -322,7 +318,7 @@ prop_valid_states_parse() ->
   ?FORALL(S, mesos_state(), parses(S)).
 
 parses(S) ->
-  {ok, VIPs} = handle_response({ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
+  {ok, _} = handle_response({ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
 
 mesos_state() ->
   ?LET(F, list(p_framework()), #{
@@ -358,7 +354,6 @@ p_proto() ->
   ?LET(P, union(["tcp", "udp"]), P).
 
 p_ip() ->
-  measure(thing, 1, thing2),
   ?LET({I1, I2, I3, I4},
        {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
        integer_to_list(I1) ++ "." ++
