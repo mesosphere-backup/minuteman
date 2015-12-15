@@ -218,8 +218,8 @@ do_handle(Payload) ->
 
 -ifdef(TEST).
 is_local_test() ->
-  ?assertEqual(true, is_local({127,0,0,1})),
-  ?assertEqual(false, is_local({8,8,8,8})).
+  ?assertEqual(true, is_local({127, 0, 0, 1})),
+  ?assertEqual(false, is_local({8, 8, 8, 8})).
 get_src_addr_test() ->
-  ?assertEqual({127,0,0,1}, get_src_addr({127,0,0,1}, {127,0,0,1})).
+  ?assertEqual({127, 0, 0, 1}, get_src_addr({127, 0, 0, 1}, {127, 0, 0, 1})).
 -endif.
