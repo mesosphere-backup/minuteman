@@ -229,9 +229,7 @@ vip_collect(_, AccIn) ->
 
 -spec label_to_offset_vip(map()) -> [tuple()].
 label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
-  io:format("Bad portnum: ~p", [string:to_integer(binary_to_list(PortNum))]),
   {Offset, _} =  string:to_integer(binary_to_list(PortNum)),
-  io:format("Bad offset: ~p", [Offset]),
   [{Offset, VIP}];
 label_to_offset_vip(_) ->
   [].
