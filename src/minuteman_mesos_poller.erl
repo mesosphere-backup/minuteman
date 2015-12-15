@@ -32,9 +32,15 @@
 
 -record(state, {vips = orddict:new()}).
 
-
 %% Debug
 -export([poll/0]).
+
+-type task() :: map().
+-type task_status() :: map().
+-type label() :: map().
+-type networkinfos() :: map().
+-type vip_string() :: <<_:48, _:_*1>>.
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -193,7 +199,7 @@ framework_fold(#{tasks := Tasks}, AccIn) ->
 framework_fold(_, AccIn) ->
   AccIn.
 
--spec task_fold(map(), orddict:orddict()) -> orddict:orddict().
+-spec task_fold(task(), orddict:orddict()) -> orddict:orddict().
 task_fold(_Task = #{statuses := []}, AccIn) ->
   AccIn;
 task_fold(_Task = #{
@@ -207,7 +213,7 @@ task_fold(_Task = #{
 task_fold(_, AccIn) ->
   AccIn.
 
--spec vip_permutations(map(), [binary()], [binary()], orddict:orddict()) -> orddict:orddict().
+-spec vip_permutations(task_status(), [binary()], [binary()], orddict:orddict()) -> orddict:orddict().
 vip_permutations(_Status = #{healthy := false}, _Ports, _Labels, AccIn) ->
   AccIn;
 vip_permutations(Status, Ports, Labels, AccIn) ->
@@ -218,6 +224,9 @@ vip_permutations(Status, Ports, Labels, AccIn) ->
                          Port = lists:nth(Offset + 1, PortList),
                          {Port, VIP}
                        end, OffsetVIPs),
+  %% Although a task will pretty much always have only one IP,
+  %% it's possible for the structure in mesos to have others added,
+  %% and we don't want to brittle to this possible future.
   IPPortVIPPerms = [{IP, Port, VIP} || IP <- IPs, {Port, VIP} <- PortVIPs],
   lists:foldl(fun vip_collect/2, AccIn, IPPortVIPPerms).
 
@@ -227,14 +236,14 @@ vip_collect({IP, Port, VIP}, AccIn) ->
 vip_collect(_, AccIn) ->
   AccIn.
 
--spec label_to_offset_vip(map()) -> [tuple()].
+-spec label_to_offset_vip(label()) -> [tuple()].
 label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
-  {Offset, _} =  string:to_integer(binary_to_list(PortNum)),
+  {Offset, []} =  string:to_integer(binary_to_list(PortNum)),
   [{Offset, VIP}];
 label_to_offset_vip(_) ->
   [].
 
--spec status_to_ips(map()) -> [pos_integer()].
+-spec status_to_ips(task_status()) -> [pos_integer()].
 status_to_ips(_Status = #{container_status := #{network_infos := NetworkInfos}}) ->
   networkinfos_to_ips(NetworkInfos, []);
 status_to_ips(_) ->
@@ -242,7 +251,7 @@ status_to_ips(_) ->
 
 -spec networkinfos_to_ips([], []) -> [];
                          ([], [pos_integer()]) -> [pos_integer()];
-                         ([map()], []) -> [pos_integer()].
+                         ([networkinfos()], []) -> [pos_integer()].
 networkinfos_to_ips([], Acc) ->
   Acc;
 networkinfos_to_ips([NetworkInfo|Rest], Acc) ->
@@ -261,14 +270,14 @@ parse_ports(Ports) ->
   %% ASSUMPTION: small port ranges
   ListOfLists = [lists:seq(string_to_integer(Begin), string_to_integer(End))
                  || [Begin, End] <- ListOfRangeStrs],
-  lists:usort(lists:flatten(ListOfLists)).
+  PortList = lists:flatten(ListOfLists),
+  lists:usort(PortList).
 
 -spec string_to_integer(string()) -> pos_integer() | error.
 string_to_integer(Str) ->
   {Int, _Rest} = string:to_integer(Str),
   Int.
 
--type vip_string() :: <<_:48, _:_*1>>.
 -spec normalize_vip(vip_string()) -> {tcp, inet:ip_address(), inet:port_number()};
                    (vip_string()) -> {udp, inet:ip_address(), inet:port_number()};
                    (vip_string()) -> {error, string()}.
@@ -283,20 +292,20 @@ parse_host_port(Proto, Rest) ->
   RestStr = binary_to_list(Rest),
   case string:tokens(RestStr, ":") of
     [HostStr, PortStr] ->
-      parse_host_port_2(Proto, HostStr, PortStr);
+      parse_host_port(Proto, HostStr, PortStr);
     _ ->
       {error, "bad VIP specification: " ++ Rest}
   end.
 
-parse_host_port_2(Proto, HostStr, PortStr) ->
+parse_host_port(Proto, HostStr, PortStr) ->
   case inet:parse_ipv4_address(HostStr) of
     {ok, Host} ->
-      parse_host_port_3(Proto, Host, PortStr);
+      parse_host_port_2(Proto, Host, PortStr);
     {error, einval} ->
       {error, "Bad host string: " ++ HostStr}
   end.
 
-parse_host_port_3(Proto, Host, PortStr) ->
+parse_host_port_2(Proto, Host, PortStr) ->
   case string_to_integer(PortStr) of
     error ->
       {error, "Bad port string: " ++ PortStr};
@@ -316,19 +325,19 @@ parses(S) ->
   {ok, VIPs} = handle_response({ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
 
 mesos_state() ->
-  ?LET(F, list(framework()), #{
+  ?LET(F, list(p_framework()), #{
     frameworks => F
   }).
 
-framework() ->
-  ?LET(T, list(task()), #{
+p_framework() ->
+  ?LET(T, list(p_task()), #{
     tasks => T
   }).
 
-task() ->
+p_task() ->
   NumPorts = random:uniform(20),
   ?LET({L, R, State, Statuses},
-       {list(label(NumPorts)), list(resource(NumPorts)), taskstate(), list(statuses())},
+       {list(p_label(NumPorts)), list(p_resource(NumPorts)), p_taskstate(), list(p_statuses())},
        #{
          labels => L,
          resources => R,
@@ -336,19 +345,19 @@ task() ->
          statuses => Statuses
        }).
 
-label(NumPorts) ->
-  ?LET(L, union([vip_label(NumPorts), non_vip_label()]), L).
+p_label(NumPorts) ->
+  ?LET(L, union([p_vip_label(NumPorts), p_non_vip_label()]), L).
 
-vip_label(NumPorts) ->
+p_vip_label(NumPorts) ->
   ?LET({Proto, PortNum, VIP},
-       {proto(), integer(0, NumPorts), vip()},
+       {p_proto(), integer(0, NumPorts), p_vip()},
        #{key => list_to_binary("vip_PORT" ++ integer_to_list(PortNum)),
          value => list_to_binary(Proto ++ "://" ++ VIP)}).
 
-proto() ->
+p_proto() ->
   ?LET(P, union(["tcp", "udp"]), P).
 
-ip() ->
+p_ip() ->
   measure(thing, 1, thing2),
   ?LET({I1, I2, I3, I4},
        {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
@@ -356,12 +365,12 @@ ip() ->
          integer_to_list(I2) ++ "." ++
          integer_to_list(I3) ++ "." ++
          integer_to_list(I4)).
-vip() ->
+p_vip() ->
   ?LET({IP, P},
-       {ip(), integer(0, 65535)},
+       {p_ip(), integer(0, 65535)},
        IP ++ ":" ++ integer_to_list(P)).
 
-non_vip_label() ->
+p_non_vip_label() ->
   ?SUCHTHAT({K, _V}, {binary(), binary()}, not is_vip_label(K)).
 
 is_vip_label(<<"vip_PORT", _Rest>>) ->
@@ -369,9 +378,9 @@ is_vip_label(<<"vip_PORT", _Rest>>) ->
 is_vip_label(_) ->
   false.
 
-resource(NumPorts) ->
+p_resource(NumPorts) ->
   ?LET({CPUs, Ports, Mem, Disk},
-       {integer(), res_ports(NumPorts), integer(), integer()},
+       {integer(), p_res_ports(NumPorts), integer(), integer()},
        #{
          cpus => CPUs,
          ports => Ports,
@@ -379,27 +388,27 @@ resource(NumPorts) ->
          disk => Disk
         }).
 
-res_ports(NumPorts) ->
+p_res_ports(NumPorts) ->
   ?LET(Ports,
        ?SUCHTHAT(L, list(integer(0, 65535)), length(L) >= NumPorts),
        "[" ++ string:join(lists:map(fun (P) ->
                                         integer_to_list(P) ++ "-" ++ integer_to_list(P)
                                     end, Ports), ",") ++ "]").
 
-statuses() ->
-  ?LET(S, list(status()), S).
+p_statuses() ->
+  ?LET(S, list(p_status()), S).
 
-status() ->
-  ?LET(NI, list(networkinfo()), #{
+p_status() ->
+  ?LET(NI, list(p_networkinfo()), #{
     container_status => #{
       network_infos => NI
     }
   }).
 
-networkinfo() ->
-  ?LET(IP, ip(), #{ip_address => IP}).
+p_networkinfo() ->
+  ?LET(IP, p_ip(), #{ip_address => IP}).
 
-taskstate() ->
+p_taskstate() ->
   ?LET(S, union([<<"TASK_RUNNING">>]), S).
 
 basic_init_test() ->
@@ -454,7 +463,7 @@ normalize_vip_test() ->
   ok.
 
 prop_vips_parse() ->
-  ?FORALL(#{value := VIP}, vip_label(0), not_error(normalize_vip(VIP))).
+  ?FORALL(#{value := VIP}, p_vip_label(0), not_error(normalize_vip(VIP))).
 
 not_error({error, _, _}) ->
   false;
