@@ -243,13 +243,13 @@ label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
 label_to_offset_vip(_) ->
   [].
 
--spec status_to_ips(task_status()) -> [inet:ip_address()].
+-spec status_to_ips(task_status()) -> [inet:ip4_address()].
 status_to_ips(_Status = #{container_status := #{network_infos := NetworkInfos}}) ->
   network_info_to_ips(NetworkInfos, []);
 status_to_ips(_) ->
   [].
 
--spec network_info_to_ips([network_info()], [inet:ip_address()]) -> [inet:ip_address()].
+-spec network_info_to_ips([network_info()], [inet:ip4_address()]) -> [inet:ip4_address()].
 network_info_to_ips([], Acc) ->
   Acc;
 network_info_to_ips([NetworkInfo|Rest], Acc) ->
@@ -276,7 +276,7 @@ string_to_integer(Str) ->
   {Int, _Rest} = string:to_integer(Str),
   Int.
 
--spec normalize_vip(vip_string()) -> {tcp | udp, inet:ip_address(), inet:port_number()} | {error, string()}.
+-spec normalize_vip(vip_string()) -> {tcp | udp, inet:ip4_address(), inet:port_number()} | {error, string()}.
 normalize_vip(<<"tcp://", Rest/binary>>) ->
   parse_host_port(tcp, Rest);
 normalize_vip(<<"udp://", Rest/binary>>) ->
