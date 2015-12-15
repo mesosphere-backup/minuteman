@@ -243,13 +243,13 @@ label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
 label_to_offset_vip(_) ->
   [].
 
--spec status_to_ips(task_status()) -> [{byte(), byte(), byte(), byte()}].
+-spec status_to_ips(task_status()) -> [inet:ip_address()].
 status_to_ips(_Status = #{container_status := #{network_infos := NetworkInfos}}) ->
   networkinfos_to_ips(NetworkInfos, []);
 status_to_ips(_) ->
   [].
 
--spec networkinfos_to_ips([networkinfos()], [{byte(), byte(), byte(), byte()}]) -> [{byte(), byte(), byte(), byte()}].
+-spec networkinfos_to_ips([networkinfos()], [inet:ip_address()]) -> [inet:ip_address()].
 networkinfos_to_ips([], Acc) ->
   Acc;
 networkinfos_to_ips([NetworkInfo|Rest], Acc) ->
