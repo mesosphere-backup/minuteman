@@ -203,7 +203,7 @@ do_mapping(Mapping, Socket) ->
     {tuple_reply,
       [{ip, [{v4_src, Mapping#mapping.orig_dst_ip}, {v4_dst, Mapping#mapping.orig_src_ip}]},
         {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_dst_port}, {dst_port, Mapping#mapping.orig_src_port}]}]},
-    {timeout, 100},
+    {timeout, 2},
     {protoinfo, [{tcp, [{state, syn_sent}]}]},
     {nat_src,
       [{v4_src, Mapping#mapping.new_src_ip},
