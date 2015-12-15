@@ -31,8 +31,10 @@
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -define(SERVER, ?MODULE).
+-define(ROUTE_CACHE_TIME_SECONDS, 10).
 
--record(state, {socket = erlang:error() :: gen_socket:socket()}).
+-record(route_cache, {addr = {0, 0, 0, 0} :: inet:ip4_address(), timestamp = 0 :: integer(), route = [] :: nla()}).
+-record(state, {socket = erlang:error() :: gen_socket:socket(), table_id = erlang:error() :: ets:tid()}).
 %% TODO: define a route,
 %% They look roughly like:
 %[{dst,{8,8,8,8}},
@@ -40,7 +42,7 @@
 %{prefsrc,{10,0,2,15}},
 %{gateway,{10,0,2,2}}]
 % Treat it as a proplist, not an ordict
--type(route() :: [term()]).
+-type(route() :: [{atom(), term()}]).
 
 %%%===================================================================
 %%% API
@@ -79,6 +81,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  TableID = ets:new(route_cache, [set, {keypos, #route_cache.addr}]),
   %% TODO: Return error, don't just bail
   {unix, linux} = os:type(),
   {ok, Socket} = gen_socket:socket(netlink, raw, ?NETLINK_ROUTE),
@@ -86,7 +89,7 @@ init([]) ->
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
   ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
-  {ok, #state{socket = Socket}}.
+  {ok, #state{socket = Socket, table_id = TableID}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -104,8 +107,8 @@ init([]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 %% TODO: Caching.
-handle_call({get_route, Addr}, _From, State = #state{socket = Socket}) ->
-  Reply = handle_get_route(Addr, Socket),
+handle_call({get_route, Addr}, _From, State = #state{socket = Socket, table_id = TableID}) ->
+  Reply = handle_get_route(Addr, Socket, TableID),
   {reply, Reply, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -194,10 +197,31 @@ nfnl_query(Socket, Query) ->
       Other
   end.
 
+-spec(maybe_update_cache(Timestamp :: integer(), Address :: inet:ip4_address(), TableID :: ets:tid(),
+  {ok, Route :: route()} | {error, Reason :: term()}) -> {ok, Route :: route()} | {error, Reason :: term()}).
+maybe_update_cache(Timestamp, Address, TableId, {ok, Route}) ->
+  Route1 = [{route_cache_timestamp, Timestamp}|Route],
+  ets:insert(TableId, #route_cache{addr = Address, timestamp = Timestamp, route = Route1}),
+  {ok, Route1};
+maybe_update_cache(_, _, _, Else) -> Else.
 
--spec(handle_get_route(Addr :: inet:ip4_address(), Socket :: gen_socket:socket()) ->
+
+-spec(handle_get_route(Addr :: inet:ip4_address(), Socket :: gen_socket:socket(), TableID :: ets:tid()) ->
   {ok, Route :: route} | {error, Reason :: term()}).
-handle_get_route(Addr, Socket) when is_tuple(Addr) ->
+handle_get_route(Addr, Socket, TableID) ->
+  Now = erlang:monotonic_time(seconds),
+  case ets:lookup(TableID, Addr) of
+    [#route_cache{timestamp = Timestamp, route = Route}] when (Now - Timestamp) < ?ROUTE_CACHE_TIME_SECONDS ->
+      {ok, Route};
+    _ ->
+      Route = handle_get_route_real(Addr, Socket),
+      maybe_update_cache(Now, Addr, TableID, Route)
+  end.
+
+
+-spec(handle_get_route_real(Addr :: inet:ip4_address(), Socket :: gen_socket:socket()) ->
+  {ok, Route :: route()} | {error, Reason :: term()}).
+handle_get_route_real(Addr, Socket) when is_tuple(Addr) ->
   Seq = erlang:time_offset() + erlang:monotonic_time(),
   Req = [{dst, Addr}],
   Family = inet,
@@ -235,11 +259,26 @@ basic_test() ->
   end.
 basic_test_real() ->
   {ok, State} = init([]),
-  {ok, Response} = handle_get_route({8, 8, 8, 8}, State#state.socket),
+  {ok, Response} = handle_get_route({8, 8, 8, 8}, State#state.socket, State#state.table_id),
   ?assertNotEqual(proplists:get_value(prefsrc, Response, undefined), undefined),
   ?assertNotEqual(proplists:get_value(gateway, Response, undefined), undefined).
 
--endif.
+cache_test() ->
+  case os:type() of
+    {unix, linux} ->
+      cache_test_real();
+    _ ->
+      ?debugMsg("Unsupported OS")
+  end.
+cache_test_real() ->
+  {ok, State} = init([]),
+  {ok, Response1} = handle_get_route({8, 8, 8, 8}, State#state.socket, State#state.table_id),
+  {ok, Response2} = handle_get_route({8, 8, 8, 8}, State#state.socket, State#state.table_id),
+  ?assertEqual(Response1, Response2),
+  ?assertNotEqual(proplists:get_value(route_cache_timestamp, Response1, undefined), undefined),
+  ?assertNotEqual(proplists:get_value(route_cache_timestamp, Response2, undefined), undefined).
+
+  -endif.
 
 
 
