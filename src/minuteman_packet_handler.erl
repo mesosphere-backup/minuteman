@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, handle/1]).
+-export([start_link/0, handle/1, refresh_ifaddrs/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -34,11 +34,18 @@
 -include("enfhackery.hrl").
 -define(SERVER, ?MODULE).
 
--record(state, {socket}).
+-define(REFRESH_INTERVAL, 5000).
+-record(state, {local_addrs = erlang:error()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+
+refresh_ifaddrs(Pid) ->
+  {ok, InetIfaddrs} = inet:getifaddrs(),
+  InetIfaddrsSet = inet_ifaddrs_to_set(InetIfaddrs),
+  gen_server:cast(Pid, {refresh_ifaddrs, InetIfaddrsSet}).
 
 handle(Payload) ->
   catch gen_server:call(?SERVER, {handle_payload, Payload}).
@@ -71,7 +78,10 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  {ok, #state{}}.
+  {ok, InetIfaddrs} = inet:getifaddrs(),
+  InetIfaddrsSet = inet_ifaddrs_to_set(InetIfaddrs),
+  {ok, _Tref} = timer:apply_interval(?REFRESH_INTERVAL, ?MODULE, refresh_ifaddrs, [self()]),
+  {ok, #state{local_addrs = InetIfaddrsSet}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -89,7 +99,7 @@ init([]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call({handle_payload, Payload}, _From, State) ->
-  do_handle(Payload),
+  do_handle(Payload, State),
   {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -105,6 +115,8 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast({refresh_ifaddrs, InetIfaddrs}, State) ->
+  {noreply, State#state{local_addrs = InetIfaddrs}};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -159,22 +171,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-is_local(IP) ->
-  {ok, Addresses} = inet:getifaddrs(),
-  is_local(IP, Addresses).
-is_local(_IP, []) ->
-  false;
-is_local(IP, [{_Ifname, Ifopt}|Interfaces]) ->
-  Addrs = [Addr ||{addr, Addr} <- Ifopt],
-  case lists:member(IP, Addrs) of
-    true ->
-      true;
-    false ->
-      is_local(IP, Interfaces)
-  end.
+inet_ifaddrs_to_set(IfList) ->
+  IfOptsAll = [IfOpts ||{_IfName, IfOpts} <- IfList],
+  IfOptsAllFlat = lists:flatten(IfOptsAll),
+  AllAddrs = [Addr || {addr, Addr} <- IfOptsAllFlat, tuple_size(Addr) == 4],
+  sets:from_list(AllAddrs).
 
-get_src_addr(SrcAddr, BackendIP) ->
-  case {is_local(SrcAddr), is_local(BackendIP)} of
+is_local(IP, LocalAddresses) when tuple_size(IP) == 4 ->
+  sets:is_element(IP, LocalAddresses).
+
+get_src_addr(SrcAddr, BackendIP, LocalAddresses) ->
+  case {is_local(SrcAddr, LocalAddresses), is_local(BackendIP, LocalAddresses)} of
     {true, true} ->
       {127, 0, 0, 1};
     {true, false} ->
@@ -188,7 +195,18 @@ get_src_addr(SrcAddr, BackendIP) ->
       PrefSrc = proplists:get_value(prefsrc, Route),
       PrefSrc
   end.
-do_handle(Payload) ->
+
+
+do_handle(Payload, _State = #state{local_addrs = LocalAddresses}) ->
+  case to_mapping(Payload, LocalAddresses) of
+    {ok, Mapping} ->
+      lager:info("Mapping: ~p", [Mapping]),
+      minuteman_ct:handle_mapping(Mapping);
+    Else ->
+      lager:error("Unable to handle mapping: ~p", [Else])
+  end.
+
+to_mapping(Payload, LocalAddresses) ->
   [IP, TCP|_] = pkt:decapsulate(ipv4, Payload),
   DstAddr = IP#ipv4.daddr,
   DstPort = TCP#tcp.dport,
@@ -197,7 +215,7 @@ do_handle(Payload) ->
       lager:debug("Backend: ~p", [Backend]),
       SrcAddr = IP#ipv4.saddr,
       SrcPort = TCP#tcp.sport,
-      NewSrcAddr = get_src_addr(SrcAddr, BackendIP),
+      NewSrcAddr = get_src_addr(SrcAddr, BackendIP, LocalAddresses),
       Mapping = #mapping{orig_src_ip = SrcAddr,
         orig_src_port = SrcPort,
         orig_dst_ip = DstAddr,
@@ -206,20 +224,59 @@ do_handle(Payload) ->
         new_src_port = SrcPort - 31743,
         new_dst_ip = BackendIP,
         new_dst_port = BackendPort},
+      {ok, Mapping};
 
-      lager:info("Mapping: ~p", [Mapping]),
-      minuteman_ct:handle_mapping(Mapping);
-
-    _ ->
-      lager:debug("Could not map connection")
+    Else ->
+      lager:debug("Could not map connection"),
+      {error, {no_backend, Else}}
   end.
 
 
 
 -ifdef(TEST).
-is_local_test() ->
-  ?assertEqual(true, is_local({127, 0, 0, 1})),
-  ?assertEqual(false, is_local({8, 8, 8, 8})).
-get_src_addr_test() ->
-  ?assertEqual({127, 0, 0, 1}, get_src_addr({127, 0, 0, 1}, {127, 0, 0, 1})).
+
+local_to_foreign_test() ->
+  Payload = <<>>,
+  TCP = #tcp{sport = 55000, dport = 1000},
+  IPv4 = #ipv4{daddr = {1,1,1,1}},
+  Packet = <<(pkt:ipv4(IPv4))/binary, (pkt:tcp(TCP))/binary, Payload/binary>>,
+  {ok, InetIfaddrs} = inet:getifaddrs(),
+  InetIfaddrsSet = inet_ifaddrs_to_set(InetIfaddrs),
+  meck:new(minuteman_vip_server),
+  meck:expect(minuteman_vip_server, get_backend, fun({1,1,1,1}, 1000) ->  {ok, {{8,8,8,8},31421}} end),
+  ExpectedMapping = #mapping{
+    orig_src_ip = {127,0,0,1},
+    orig_src_port = 55000,
+    orig_dst_ip = {1,1,1,1},
+    orig_dst_port = 1000,
+    new_src_ip = {127,0,0,1},
+    new_src_port = 23257,
+    new_dst_ip = {8,8,8,8},
+    new_dst_port = 31421},
+  ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet, InetIfaddrsSet)),
+  meck:unload(minuteman_vip_server).
+
+foreign_to_foreign_test() ->
+  Payload = <<>>,
+  TCP = #tcp{sport = 55000, dport = 1000},
+  IPv4 = #ipv4{saddr = {8,8,4,4}, daddr = {1,1,1,1}},
+  Packet = <<(pkt:ipv4(IPv4))/binary, (pkt:tcp(TCP))/binary, Payload/binary>>,
+  {ok, InetIfaddrs} = inet:getifaddrs(),
+  InetIfaddrsSet = inet_ifaddrs_to_set(InetIfaddrs),
+  meck:new(minuteman_vip_server),
+  meck:expect(minuteman_vip_server, get_backend, fun({1,1,1,1}, 1000) ->  {ok, {{8,8,8,8},31421}} end),
+  meck:new(minuteman_routes),
+  meck:expect(minuteman_routes, get_route, fun({8,8,8,8}) -> {ok, [{prefsrc, {9,9,9,9}}]} end),
+  ExpectedMapping = #mapping{
+    orig_src_ip = {8,8,4,4},
+    orig_src_port = 55000,
+    orig_dst_ip = {1,1,1,1},
+    orig_dst_port = 1000,
+    new_src_ip = {9,9,9,9},
+    new_src_port = 23257,
+    new_dst_ip = {8,8,8,8},
+    new_dst_port = 31421},
+  ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet, InetIfaddrsSet)),
+  meck:unload(minuteman_vip_server),
+  meck:unload(minuteman_routes).
 -endif.
