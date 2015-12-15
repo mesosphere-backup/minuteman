@@ -46,7 +46,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {socket, queue}).
+-record(state, {socket = erlang:error() :: gen_socket:socket(), queue = erlang:error() :: non_neg_integer()}).
 
 %%%===================================================================
 %%% API
@@ -265,11 +265,6 @@ nfq_create_queue(Socket, Queue) ->
 nfq_set_mode(Socket, Queue, CopyMode, CopyLen) ->
   Cmd = {params, CopyLen, CopyMode},
   Msg = {queue, config, [ack, request], 0, 0, {unspec, 0, Queue, [Cmd]}},
-  nfnl_query(Socket, Msg).
-
-nfq_set_flags(Socket, Queue, Flags, Mask) ->
-  Cmd = [{mask, Mask}, {flags, Flags}],
-  Msg = {queue, config, [ack, request], 0, 0, {unspec, 0, Queue, Cmd}},
   nfnl_query(Socket, Msg).
 
 
