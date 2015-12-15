@@ -38,7 +38,7 @@
 -type task() :: map().
 -type task_status() :: map().
 -type label() :: map().
--type networkinfos() :: map().
+-type network_info() :: map().
 -type vip_string() :: <<_:48, _:_*1>>.
 
 %%%===================================================================
@@ -245,17 +245,17 @@ label_to_offset_vip(_) ->
 
 -spec status_to_ips(task_status()) -> [inet:ip_address()].
 status_to_ips(_Status = #{container_status := #{network_infos := NetworkInfos}}) ->
-  networkinfos_to_ips(NetworkInfos, []);
+  network_info_to_ips(NetworkInfos, []);
 status_to_ips(_) ->
   [].
 
--spec networkinfos_to_ips([networkinfos()], [inet:ip_address()]) -> [inet:ip_address()].
-networkinfos_to_ips([], Acc) ->
+-spec network_info_to_ips([network_info()], [inet:ip_address()]) -> [inet:ip_address()].
+network_info_to_ips([], Acc) ->
   Acc;
-networkinfos_to_ips([NetworkInfo|Rest], Acc) ->
+network_info_to_ips([NetworkInfo|Rest], Acc) ->
   #{ip_address := IPAddressBin} = NetworkInfo,
   {ok, IPAddress} = inet:parse_ipv4_address(binary_to_list(IPAddressBin)),
-  networkinfos_to_ips(Rest, [IPAddress|Acc]).
+  network_info_to_ips(Rest, [IPAddress|Acc]).
 
 -spec parse_ports(binary()) -> [pos_integer()].
 parse_ports(Ports) ->
@@ -394,13 +394,13 @@ p_statuses() ->
   ?LET(S, list(p_status()), S).
 
 p_status() ->
-  ?LET(NI, list(p_networkinfo()), #{
+  ?LET(NI, list(p_network_info()), #{
     container_status => #{
       network_infos => NI
     }
   }).
 
-p_networkinfo() ->
+p_network_info() ->
   ?LET(IP, p_ip(), #{ip_address => IP}).
 
 p_taskstate() ->
@@ -430,12 +430,12 @@ status_to_ips_test() ->
                    })),
   ok.
 
-networkinfos_to_ips_test() ->
-  ?assertEqual([], networkinfos_to_ips([], [])),
-  ?assertEqual([1], networkinfos_to_ips([], [1])),
-  ?assertException(error, {badmatch, _}, networkinfos_to_ips([#{ip_address => <<>>}], [])),
-  ?assertException(error, {badmatch, _}, networkinfos_to_ips([#{ip_address => <<"1.a2">>}], [])),
-  ?assertEqual([{1, 2, 3, 4}], networkinfos_to_ips([#{ip_address => <<"1.2.3.4">>}], [])),
+network_info_to_ips_test() ->
+  ?assertEqual([], network_info_to_ips([], [])),
+  ?assertEqual([1], network_info_to_ips([], [1])),
+  ?assertException(error, {badmatch, _}, network_info_to_ips([#{ip_address => <<>>}], [])),
+  ?assertException(error, {badmatch, _}, network_info_to_ips([#{ip_address => <<"1.a2">>}], [])),
+  ?assertEqual([{1, 2, 3, 4}], network_info_to_ips([#{ip_address => <<"1.2.3.4">>}], [])),
   ok.
 
 parse_ports_test() ->
