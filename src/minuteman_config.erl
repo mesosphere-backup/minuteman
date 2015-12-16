@@ -22,7 +22,12 @@ poll_interval() ->
 
 %% Returns a integer
 queue() ->
-  application:get_env(minuteman, queue, 0).
+  case application:get_env(minuteman, queue, {50, 58}) of
+    X when is_integer(X) ->
+      {X, X};
+    Y ->
+      Y
+  end.
 
 networking() ->
   application:get_env(minuteman, enable_networking, true).

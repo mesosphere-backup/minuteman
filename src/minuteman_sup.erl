@@ -26,7 +26,7 @@ start_link() ->
 maybe_add_network_child(Children) ->
     case minuteman_config:networking() of
         true ->
-            [?CHILD(minuteman_network_sup, supervisor)|Children];
+            [?CHILD(minuteman_network_sup_sup, supervisor)|Children];
         false ->
             Children
     end.
