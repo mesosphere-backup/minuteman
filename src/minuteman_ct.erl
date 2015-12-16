@@ -90,7 +90,7 @@ init([]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call({handle_mapping, Mapping}, _From, State = #state{socket = Socket}) ->
-  do_mapping(Mapping, Socket),
+  try_mapping(Mapping, Socket),
   {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -197,7 +197,8 @@ nfnl_query2(Socket, Query) ->
           ok;
         [{netlink, error, [], _, _, {ErrNo, SubData}}|_] ->
           SubMsg = netlink:nl_ct_dec(SubData),
-          lager:warning("Errno2 (~p): ~p~n", [ErrNo, SubMsg]);
+          lager:warning("Errno2 (~p): ~p~n", [ErrNo, SubMsg]),
+          {error, ErrNo};
         [Msg|_] ->
           {error, Msg};
         Other ->
@@ -216,15 +217,50 @@ socket(Family, Type, Protocol, Opts) ->
       gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
 
-do_mapping(Mapping, Socket) ->
+try_mapping(Mapping, Socket) ->
+
+  Msg = build_ctnetlink_msg_create(Mapping),
+  Status = nfnl_query2(Socket, Msg),
+  case Status of
+    {error, 2717908991} ->
+      retry_mapping(Mapping, Socket);
+    {error, Error} ->
+      lager:warning("Mapping Status Error: ~p", [Error]);
+    _ ->
+      lager:debug("Mapping Status: ~p", [Status])
+  end.
+
+retry_mapping(Mapping, Socket) ->
+  MsgDelete = build_ctnetlink_msg_delete(Mapping),
+  _DeleteStatus = nfnl_query2(Socket, MsgDelete),
+  MsgCreate = build_ctnetlink_msg_create(Mapping),
+  CreateStatus = nfnl_query2(Socket, MsgCreate),
+  case CreateStatus of
+    {error, Error} ->
+      lager:warning("Retried Mapping Status Error: ~p", [Error]);
+    _ ->
+      lager:debug("Retried Mapping Status: ~p", [CreateStatus])
+  end.
+
+build_ctnetlink_msg_delete(Mapping) ->
   Seq = erlang:time_offset() + erlang:monotonic_time(),
+  TupleOrig = tuple_orig(Mapping),
+  TupleReply = tuple_reply(Mapping),
   Cmd = {inet, 0, 0, [
-    {tuple_orig,
-      [{ip, [{v4_src, Mapping#mapping.orig_src_ip}, {v4_dst, Mapping#mapping.orig_dst_ip}]},
-        {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_src_port}, {dst_port, Mapping#mapping.orig_dst_port}]}]},
-    {tuple_reply,
-      [{ip, [{v4_src, Mapping#mapping.orig_dst_ip}, {v4_dst, Mapping#mapping.orig_src_ip}]},
-        {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_dst_port}, {dst_port, Mapping#mapping.orig_src_port}]}]},
+    TupleOrig,
+    TupleReply,
+    {protoinfo, [{tcp, []}]}
+  ]},
+  Msg = [#ctnetlink{type = delete, flags = [request, ack], seq = Seq, pid = 0, msg = Cmd}],
+  Msg.
+
+build_ctnetlink_msg_create(Mapping) ->
+  Seq = erlang:time_offset() + erlang:monotonic_time(),
+  TupleOrig = tuple_orig(Mapping),
+  TupleReply = tuple_reply(Mapping),
+  Cmd = {inet, 0, 0, [
+    TupleOrig,
+    TupleReply,
     {timeout, 2},
     {protoinfo, [{tcp, [{state, syn_sent}]}]},
     {nat_src,
@@ -235,11 +271,13 @@ do_mapping(Mapping, Socket) ->
         {dst_port, [{min_port, Mapping#mapping.new_dst_port}, {max_port, Mapping#mapping.new_dst_port}]}]}
   ]},
   Msg = [#ctnetlink{type = new, flags = [create, request, ack], seq = Seq, pid = 0, msg = Cmd}],
-  Status = nfnl_query2(Socket, Msg),
-  case Status of
-    {error, Error} ->
-      lager:warning("Mapping Status Error: ~p", [Error]);
-    _ ->
-      lager:debug("Mapping Status: ~p", [Status])
-  end.
+  Msg.
 
+tuple_orig(Mapping) ->
+  {tuple_orig,
+    [{ip, [{v4_src, Mapping#mapping.orig_src_ip}, {v4_dst, Mapping#mapping.orig_dst_ip}]},
+      {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_src_port}, {dst_port, Mapping#mapping.orig_dst_port}]}]}.
+tuple_reply(Mapping) ->
+  {tuple_reply,
+    [{ip, [{v4_src, Mapping#mapping.orig_dst_ip}, {v4_dst, Mapping#mapping.orig_src_ip}]},
+      {proto, [{num, tcp}, {src_port, Mapping#mapping.orig_dst_port}, {dst_port, Mapping#mapping.orig_src_port}]}]}.
