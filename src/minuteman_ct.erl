@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, handle_mapping/1]).
+-export([start_link/1, handle_mapping/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -21,8 +21,6 @@
   handle_info/2,
   terminate/2,
   code_change/3]).
-
--define(SERVER, ?MODULE).
 
 -record(state, {socket}).
 
@@ -35,18 +33,18 @@
 %%% API
 %%%===================================================================
 
-handle_mapping(Mapping) ->
-  gen_server:call(?SERVER, {handle_mapping, Mapping}).
+handle_mapping(Num, Mapping) ->
+  gen_server:call(?SERVER_NAME_WITH_NUM(Num), {handle_mapping, Mapping}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link() ->
+-spec(start_link(Num :: non_neg_integer()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link() ->
-  gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Num) ->
+  gen_server:start_link({local, ?SERVER_NAME_WITH_NUM(Num)}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -68,11 +66,12 @@ start_link() ->
   {stop, Reason :: term()} | ignore).
 init([]) ->
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, 57108864),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, 57108864),
   %% Our fates are linked.
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
   ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
-
   {ok, #state{socket = Socket}}.
 
 %%--------------------------------------------------------------------
@@ -124,6 +123,23 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
+  case gen_socket:recv(Socket, 8192) of
+    {ok, Data} ->
+      Msg = netlink:nl_ct_dec(Data),
+      case Msg of
+        [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
+          ok;
+        [{netlink, error, [], _, _, {ErrNo, SubData}}|_] ->
+          SubMsg = netlink:nl_ct_dec(SubData),
+          lager:warning("Errno (~p): ~p~n", [ErrNo, SubMsg])
+      end;
+    Other ->
+      lager:warning("Unknown msg (ct): ~p~n", [Other])
+  end,
+  ok = gen_socket:input_event(Socket, true),
+  {noreply, State};
+
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -163,19 +179,25 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 
+
 nfnl_query(Socket, Query) ->
+  Request = netlink:nl_ct_enc(Query),
+  gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
+
+nfnl_query2(Socket, Query) ->
   Request = netlink:nl_ct_enc(Query),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
   Answer = gen_socket:recv(Socket, 8192),
-  lager:debug("Answer: ~p~n", [Answer]),
+  %lager:debug("Answer: ~p~n", [Answer]),
   case Answer of
     {ok, Reply} ->
       lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
-        [{netlink, error, [], _, _, {ErrNo, _}}|_] ->
-          {error, ErrNo};
+        [{netlink, error, [], _, _, {ErrNo, SubData}}|_] ->
+          SubMsg = netlink:nl_ct_dec(SubData),
+          lager:warning("Errno2 (~p): ~p~n", [ErrNo, SubMsg]);
         [Msg|_] ->
           {error, Msg};
         Other ->
@@ -212,6 +234,12 @@ do_mapping(Mapping, Socket) ->
       [{v4_dst, Mapping#mapping.new_dst_ip},
         {dst_port, [{min_port, Mapping#mapping.new_dst_port}, {max_port, Mapping#mapping.new_dst_port}]}]}
   ]},
-  Msg = [#ctnetlink{type = new, flags = [create, excl, ack, request], seq = Seq, pid = 0, msg = Cmd}],
-  Status = nfnl_query(Socket, Msg),
-  lager:debug("Mapping Status: ~p", [Status]).
+  Msg = [#ctnetlink{type = new, flags = [create, request, ack], seq = Seq, pid = 0, msg = Cmd}],
+  Status = nfnl_query2(Socket, Msg),
+  case Status of
+    {error, Error} ->
+      lager:warning("Mapping Status Error: ~p", [Error]);
+    _ ->
+      lager:debug("Mapping Status: ~p", [Status])
+  end.
+

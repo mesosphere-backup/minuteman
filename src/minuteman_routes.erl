@@ -28,6 +28,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+-include("enfhackery.hrl").
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -define(SERVER, ?MODULE).

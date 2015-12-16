@@ -18,3 +18,6 @@
   new_dst_ip,
   new_dst_port
   }).
+
+-define(SERVER_NAME_WITH_NUM(Num),
+  list_to_atom(lists:flatten([?MODULE_STRING, "_", integer_to_list(Num)]))).

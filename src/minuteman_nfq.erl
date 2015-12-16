@@ -13,7 +13,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -23,25 +23,13 @@
   terminate/2,
   code_change/3]).
 
--define(MODULES, ["xt_CT","xt_LOG","xt_mark","xt_set","ip_set","xt_nat","xt_NFQUEUE",
-  "xt_conntrack","xt_addrtype","xt_CHECKSUM","nf_nat","nf_conntrack",
-  "xt_tcpudp","x_tables","nf_log_ipv4","nf_log_common","nf_reject_ipv4",
-  "nfnetlink_log","nfnetlink_acct","nf_tables","nf_conntrack_netlink",
-  "nfnetlink_queue","nfnetlink","nf_nat_masquerade_ipv4","nf_conntrack_ipv4",
-  "nf_defrag_ipv4","nf_nat_ipv4","nf_nat","nf_conntrack", "iptable_nat", "ipt_MASQUERADE"]).
--define(RULES, [
-  {raw, output, "-p tcp -m set --match-set minuteman dst,dst -m tcp "++
-                "--tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
-  {raw, prerouting, "-p tcp -m set --match-set minuteman dst,dst -m tcp "++
-                    "--tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num QUEUE_NUMBER"},
-  {filter, output, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"},
-  {filter, forward, "-p tcp -m set --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"}
-]).
+
 
 
 
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
+-include("enfhackery.hrl").
 -define(NFQNL_COPY_PACKET, 2).
 
 -define(SERVER, ?MODULE).
@@ -58,10 +46,10 @@
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link() ->
+-spec(start_link(Queue :: non_neg_integer()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link() ->
-  gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Queue) ->
+  gen_server:start_link({local, ?SERVER_NAME_WITH_NUM(Queue)}, ?MODULE, [Queue], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -81,9 +69,7 @@ start_link() ->
 -spec(init(Args :: term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([]) ->
-  setup_iptables(),
-  Queue = minuteman_config:queue(),
+init([Queue]) ->
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   %% Our fates are linked.
   {gen_socket, RealPort, _, _, _, _} = Socket,
@@ -92,6 +78,8 @@ init([]) ->
   ok = nfq_unbind_pf(Socket, inet),
   ok = nfq_bind_pf(Socket, inet),
   ok = nfq_create_queue(Socket, Queue),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, 57108864),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, 57108864),
   ok = nfq_set_mode(Socket, Queue, ?NFQNL_COPY_PACKET, 65535),
   ok = gen_socket:input_event(Socket, true),
   {ok, #state{socket = Socket, queue = Queue}}.
@@ -194,26 +182,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-setup_iptables() ->
-  lists:foreach(fun(Module) -> os:cmd(lists:flatten(io_lib:format("modprobe ~s", [Module]))) end, ?MODULES),
-    %"-t raw -%s OUTPUT -p tcp -m set
-    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num"
-    %"-t raw -%s PREROUTING -p tcp -m set
-    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j NFQUEUE --queue-num"
-    %"-t filter -%s OUTPUT -p tcp -m set
-    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"
-    %"-t filter -%s FORWARD -p tcp -m set
-    %     --match-set minuteman dst,dst -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REJECT"
-  lists:foreach(fun load_rule/1, ?RULES).
-load_rule({Table, Chain, Rule}) ->
-  Rule1 = re:replace(Rule, "QUEUE_NUMBER", integer_to_list(minuteman_config:queue()),  [global, {return, list}]),
-  case iptables:check(Table, Chain, Rule1) of
-    {ok, []} ->
-      ok;
-    _ ->
-      lager:debug("Loading rule: ~p", [Rule1]),
-      {ok, []} = iptables:insert(Table, Chain, Rule1)
-  end.
 
 
 build_send_cfg_msg(Socket, Command, Queue, Pf) ->
@@ -281,7 +249,7 @@ process_nfq_msg({queue, packet, _Flags, _Seq, _Pid, Packet}, State) ->
 
 process_nfq_packet({Family, _Version, _Queue, Info}, _State = #state{socket = Socket, queue = Queue})
   when Family == inet; Family == inet6 ->
-  handle_packet(Info),
+  handle_packet(Queue, Info),
   {_, Id, _, _} = lists:keyfind(packet_hdr, 1, Info),
   lager:debug("Verdict for ~p~n", [Id]),
   NLA = [{verdict_hdr, ?NF_ACCEPT, Id}],
@@ -298,6 +266,6 @@ process_nfq_packet({_Family, _Version, _Queue, Info},
   Request = netlink:nl_ct_enc(Msg),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
 
-handle_packet(Info) ->
+handle_packet(Queue, Info) ->
   {payload, Payload} = lists:keyfind(payload, 1, Info),
-  minuteman_packet_handler:handle(Payload).
+  minuteman_packet_handler:handle(Queue, Payload).
