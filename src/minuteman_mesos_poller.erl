@@ -239,7 +239,12 @@ vip_permutations(Status, Ports, Labels, AccIn) ->
 
 -spec vip_collect(tuple(), orddict:orddict()) -> orddict:orddict().
 vip_collect({IP, Port, VIP}, AccIn) ->
-  orddict:append_list(normalize_vip(VIP), [{IP, Port}], AccIn);
+  case normalize_vip(VIP) of
+    {error, _} ->
+      AccIn;
+    ProtoHostPort ->
+      orddict:append_list(ProtoHostPort, [{IP, Port}], AccIn)
+  end;
 vip_collect(_, AccIn) ->
   AccIn.
 
@@ -469,6 +474,7 @@ normalize_vip_test() ->
   ?assertMatch({error, _}, normalize_vip(<<"tcp://">>)),
   ?assertMatch({error, _}, normalize_vip(<<"tcp://1.">>)),
   ?assertMatch({error, _}, normalize_vip(<<"tcp://1.:423">>)),
+  ?assertMatch({error, _}, normalize_vip(<<"1.2.3.4:5">>)),
   ok.
 
 prop_vips_parse() ->
