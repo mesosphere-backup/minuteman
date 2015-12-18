@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. Dec 2015 11:44 PM
 %%%-------------------------------------------------------------------
--module(minuteman_retry_detector).
+-module(minuteman_conn_latency_observer).
 -author("Tyler Neely").
 
 -behaviour(gen_server).
@@ -35,6 +35,8 @@
 -define(NFNLGRP_CONNTRACK_EXP_UPDATE, 5).
 -define(SOL_NETLINK, 270).
 -define(NETLINK_ADD_MEMBERSHIP, 1).
+
+-define(RCVBUF_DEFAULT, 212992).
 
 -define(SERVER, ?MODULE).
 
@@ -74,15 +76,15 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  ets:new(unreplied_backends, [public, named_table]),
+  ets:new(connection_timers, [named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
   ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
   ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, 57108864),
-  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, 57108864),
   ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_NEW),
   ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_UPDATE),
+  netlink:rcvbufsiz(Socket, ?RCVBUF_DEFAULT),
   ok = gen_socket:input_event(Socket, true),
   {ok, #state{socket = Socket}}.
 
@@ -101,8 +103,6 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({handle_mapping, Mapping}, _From, State = #state{socket = Socket}) ->
-  {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -134,13 +134,23 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
+  case ets:take(connection_timers, ID) of
+    [{_ID, Time}] ->
+      Success = false,
+      minuteman_ewma:observe(max(os:system_time() - Time, 0), {IP, Port}, Success);
+    _ ->
+      % we've already cleared it
+      ok
+  end,
+  {noreply, State};
 handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
   case gen_socket:recv(Socket, 8192) of
     {ok, Data} ->
       Msg = netlink:nl_ct_dec(Data),
-      lists:map(fun handle_conn/1, Msg);
+      lists:foreach(fun handle_conn/1, Msg);
     Other ->
-      lager:warning("Unknown msg (ct): ~p~n", [Other])
+      lager:warning("Unknown msg (ct_latency): ~p", [Other])
   end,
   ok = gen_socket:input_event(Socket, true),
   {noreply, State};
@@ -191,28 +201,45 @@ socket(Family, Type, Protocol, Opts) ->
       gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
 
-handle_conn(#ctnetlink{type = Type, msg = {inet,_,_,[{tuple_orig,Orig},
-                                                     {tuple_reply,Reply},
-                                                     {id,ID},
-                                                     {status,Status} | _Rest]}}) ->
-  mark_replied(fmt_net(Reply), Status),
-  ok.
+handle_conn(#ctnetlink{msg = {_Family, _, _, Props}}) ->
+  {id, ID} = proplists:lookup(id, Props),
+  {status, Status} = proplists:lookup(status, Props),
+  {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
+  Addresses = fmt_net(Reply),
+  mark_replied(ID, Addresses, Status).
 
-mark_replied({_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
+mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
   case lists:member(seen_reply, Status) of
     true ->
       lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
-      ets:delete(unreplied_backends, {DstIP, DstPort});
+      case ets:take(connection_timers, ID) of
+        [{_ID, Time}] ->
+          Success = true,
+          minuteman_ewma:observe(max(os:system_time() - Time, 0), {DstIP, DstPort}, Success);
+        _ ->
+          % we've already cleared it, or we never saw its initial SYN
+          ok
+      end;
     false ->
+      minuteman_ewma:set_pending({DstIP, DstPort}),
       lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
-      ets:update_counter(unreplied_backends, {DstIP, DstPort}, 1, {{DstIP, DstPort}, 0})
+      % Set up a timer and schedule a connection check at the
+      % configured threshold.
+      ets:insert(connection_timers, {ID, os:system_time()}),
+      timer:send_after(minuteman_config:tcp_connect_threshold(),
+                       {check_conn_connected, {ID, DstIP, DstPort}})
   end.
 
-fmt_net([{ip,
-         [{v4_src,SrcIP},
-          {v4_dst,DstIP}]},
-        {proto,
-         [{num,Proto},
-          {src_port,SrcPort},
-          {dst_port,DstPort}]}]) ->
+fmt_net(Props) ->
+  {ip, IPProps} = proplists:lookup(ip, Props),
+
+  {v4_src, SrcIP} = proplists:lookup(v4_src, IPProps),
+  {v4_dst, DstIP} = proplists:lookup(v4_dst, IPProps),
+
+  {proto, ProtoProps} = proplists:lookup(proto, Props),
+
+  {num, Proto} = proplists:lookup(num, ProtoProps),
+  {src_port, SrcPort} = proplists:lookup(src_port, ProtoProps),
+  {dst_port, DstPort} = proplists:lookup(dst_port, ProtoProps),
+
   {Proto, SrcIP, SrcPort, DstIP, DstPort}.

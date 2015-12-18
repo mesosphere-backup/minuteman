@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2015, <COMPANY>
+%%% @author sdhillon, Tyler Neely
+%%% @copyright (C) 2015, Mesosphere
 %%% @doc
 %%%
 %%% @end
@@ -8,6 +8,7 @@
 %%%-------------------------------------------------------------------
 -module(minuteman_packet_handler).
 -author("sdhillon").
+-author("Tyler Neely").
 
 -behaviour(gen_server).
 

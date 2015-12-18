@@ -193,10 +193,6 @@ code_change(_OldVsn, State, _Extra) ->
 
 nfnl_query(Socket, Query) ->
   Request = netlink:nl_ct_enc(Query),
-  gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
-
-nfnl_query2(Socket, Query) ->
-  Request = netlink:nl_ct_enc(Query),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
   Answer = gen_socket:recv(Socket, 8192),
   case Answer of

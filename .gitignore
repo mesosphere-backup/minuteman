@@ -6,3 +6,4 @@ rel/minuteman/
 *.swp
 *.swo
 app.config
+*/tags
