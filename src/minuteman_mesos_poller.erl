@@ -187,37 +187,83 @@ poll() ->
   end.
 
 handle_response({ok, {{_HttpVersion, 200, _ReasonPhrase}, _Headers, Body}}) ->
-  Data = jsx:decode(Body, [return_maps, {labels, atom}]),
-  #{frameworks := Frameworks} = Data,
-  Vips = lists:foldl(fun framework_fold/2, orddict:new(), Frameworks),
+  Vips = parse_json_to_vips(Body),
   {ok, Vips};
 handle_response(Response) ->
   lager:debug("Bad HTTP Response: ~p", [Response]),
   {error, http_error}.
-framework_fold(#{tasks := Tasks}, AccIn) ->
-  lists:foldl(fun task_fold/2, AccIn, Tasks);
-framework_fold(_, AccIn) ->
-  AccIn.
 
--spec task_fold(task(), orddict:orddict()) -> orddict:orddict().
-task_fold(_Task = #{statuses := []}, AccIn) ->
+-spec(parse_json_to_vips(Data :: binary()) -> Vips :: list(term())).
+parse_json_to_vips(Data) ->
+  Parsed = jsx:decode(Data, [return_maps, {labels, atom}]),
+  Frameworks = maps:get(frameworks, Parsed),
+  Agents = maps:get(slaves, Parsed),
+  AgentIPs = get_agent_ips(Agents),
+  Vips = framework_fold(AgentIPs, Frameworks, orddict:new()),
+  Vips.
+
+libprocess_pid_to_ip(LibprocessPid) when is_binary(LibprocessPid) ->
+  libprocess_pid_to_ip(binary_to_list(LibprocessPid));
+libprocess_pid_to_ip(LibprocessPid) ->
+  [_, HostPort] = string:tokens(LibprocessPid, "@"),
+  [Host, _Port] = string:tokens(HostPort, ":"),
+  {ok, IP} = inet:parse_ipv4_address(Host),
+  IP.
+
+
+get_agent_ips(Agents) ->
+  FoldFun =
+    fun(_Agent = #{pid := Pid, id := Id}, AccIn) ->
+      IP = libprocess_pid_to_ip(Pid),
+      orddict:store(Id, [IP], AccIn)
+    end,
+  lists:foldl(FoldFun, orddict:new(), Agents).
+
+%get_framework_fold(SlaveIPs) ->
+framework_fold(_AgentIPs, [], AccIn) ->
   AccIn;
-task_fold(_Task = #{
+framework_fold(AgentIPs, [#{tasks := Tasks}|RestFrameworks], AccIn) ->
+  AccIn2 = task_fold(AgentIPs, Tasks, AccIn),
+  framework_fold(AgentIPs, RestFrameworks, AccIn2);
+framework_fold(AgentIPs, [_|RestFrameworks], AccIn) ->
+  framework_fold(AgentIPs, RestFrameworks, AccIn).
+
+-spec task_fold(AgentIPs :: orddict:orddict(), [task()], orddict:orddict()) -> orddict:orddict().
+task_fold(_AgentIPs, [], AccIn) ->
+  AccIn;
+task_fold(AgentIPs, [_Task = #{statuses := []}|RestTasks], AccIn) ->
+  task_fold(AgentIPs, RestTasks, AccIn);
+task_fold(AgentIPs, [_Task = #{
+            container := #{docker := #{network := <<"BRIDGE">>}},
+            slave_id := SlaveID,
             labels := Labels,
             resources  := #{ports := Ports},
             statuses := Statuses,
-            state := <<"TASK_RUNNING">>}, AccIn) ->
+            state := <<"TASK_RUNNING">>}|RestTasks], AccIn) ->
   %% we only care about the most recent status, which will be the last in the list
   [Status|_] = lists:reverse(Statuses),
-  vip_permutations(Status, Ports, Labels, AccIn);
-task_fold(_, AccIn) ->
-  AccIn.
+  IPs = orddict:fetch(SlaveID, AgentIPs),
+  AccIn2 = vip_permutations(IPs, Status, Ports, Labels, AccIn),
+  task_fold(AgentIPs, RestTasks, AccIn2);
 
--spec vip_permutations(task_status(), [binary()], [binary()], orddict:orddict()) -> orddict:orddict().
-vip_permutations(_Status = #{healthy := false}, _Ports, _Labels, AccIn) ->
-  AccIn;
-vip_permutations(Status, Ports, Labels, AccIn) ->
+task_fold(AgentIPs, [_Task = #{
+            labels := Labels,
+            resources  := #{ports := Ports},
+            statuses := Statuses,
+            state := <<"TASK_RUNNING">>}|RestTasks], AccIn) ->
+  %% we only care about the most recent status, which will be the last in the list
+  [Status|_] = lists:reverse(Statuses),
   IPs = status_to_ips(Status),
+  AccIn2 = vip_permutations(IPs, Status, Ports, Labels, AccIn),
+  task_fold(AgentIPs, RestTasks, AccIn2);
+task_fold(AgentIPs, [_|RestTasks], AccIn) ->
+  task_fold(AgentIPs, RestTasks, AccIn).
+
+-spec vip_permutations([inet:ip4_address()], task_status(), [binary()], [binary()], orddict:orddict())
+    -> orddict:orddict().
+vip_permutations(_IPs, _Status = #{healthy := false}, _Ports, _Labels, AccIn) ->
+  AccIn;
+vip_permutations(IPs, _Status, Ports, Labels, AccIn) ->
   PortList = parse_ports(Ports),
   OffsetVIPs = lists:flatmap(fun label_to_offset_vip/1, Labels),
   PortVIPs = lists:flatmap(fun ({Offset, VIP}) ->
@@ -341,7 +387,8 @@ parses(S) ->
 
 mesos_state() ->
   ?LET(F, list(p_framework()), #{
-    frameworks => F
+    frameworks => F,
+    slaves => []
   }).
 
 p_framework() ->
@@ -436,8 +483,8 @@ label_to_offset_vip_test() ->
   ok.
 
 task_fold_test() ->
-  ?assertEqual([], task_fold(#{statuses => []}, [])),
-  ?assertEqual([], task_fold(#{}, [])),
+  ?assertEqual([], task_fold([], [#{statuses => []}], [])),
+  ?assertEqual([], task_fold([], [#{}], [])),
   ok.
 
 status_to_ips_test() ->
@@ -484,5 +531,39 @@ not_error({error, _, _}) ->
   false;
 not_error(_) ->
   true.
+
+two_health_check_free_vips_test() ->
+  {ok, Data} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
+  Vips = parse_json_to_vips(Data),
+  Expected = [
+    {
+      {tcp, {4, 3, 2, 1}, 1234},
+      [
+        {{33, 33, 33, 1}, 31362},
+        {{33, 33, 33, 1}, 31634}]
+    },
+    {
+      {tcp, {4, 3, 2, 2}, 1234},
+      [
+        {{33, 33, 33, 1}, 31290},
+        {{33, 33, 33, 1}, 31215}
+      ]
+    }
+  ],
+  ?assertEqual(Expected, Vips).
+
+
+docker_basic_test() ->
+  {ok, Data} = file:read_file("testdata/docker.json"),
+  Vips = parse_json_to_vips(Data),
+  Expected = [
+    {
+      {tcp, {1, 2, 3, 4}, 5000},
+      [
+        {{10, 0, 2, 4}, 28027}
+      ]
+    }
+  ],
+  ?assertEqual(Expected, Vips).
 
 -endif.

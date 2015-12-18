@@ -6,3 +6,7 @@ rel/minuteman/
 *.swp
 *.swo
 app.config
+.eunit/*html
+.eunit/*xml
+.eunit/*erl
+.eunit/*beam
