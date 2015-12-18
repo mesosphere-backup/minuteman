@@ -50,7 +50,10 @@ init([]) ->
   {Begin, End} = minuteman_config:queue(),
   Children1 = [{{minuteman_network_sup, X},
     {minuteman_network_sup, start_link, [X]}, permanent, 5000, supervisor, []} || X <- lists:seq(Begin, End)],
-  Children2 = [?CHILD(minuteman_routes, worker)|Children1],
+  Children2 = [
+               ?CHILD(minuteman_routes, worker),
+               ?CHILD(minuteman_retry_detector, worker)
+               |Children1],
   {ok,
     {
       {one_for_one, 5, 10},
