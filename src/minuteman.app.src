@@ -9,7 +9,6 @@
                   lager,
                   inets,
                   pkt,
-                  gen_netlink,
                   jsx,
                   gen_socket
                  ]},
