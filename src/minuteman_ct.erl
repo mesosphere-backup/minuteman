@@ -22,12 +22,22 @@
   terminate/2,
   code_change/3]).
 
+% This is the error code for a duplicate conntrack on 64-bit Linux
+% But it can also represent other errors
+% Like, conntrack not compiled
+
+-define(MAYBE_DUPLICATE_CONNTRACK, 2717908991).
 -record(state, {socket}).
 
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
 -include("enfhackery.hrl").
+%% These are the default max values from the kernel
+-define(SNDBUF_DEFAULT, 212992).
+-define(RCVBUF_DEFAULT, 212992).
 
+% The default size buffer we allocate to receive something from the kernel.
+-define(RECV_SIZE, 8192).
 
 %%%===================================================================
 %%% API
@@ -66,8 +76,9 @@ start_link(Num) ->
   {stop, Reason :: term()} | ignore).
 init([]) ->
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
-  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, 57108864),
-  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, 57108864),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, ?RCVBUF_DEFAULT),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, ?SNDBUF_DEFAULT),
+  netlink:rcvbufsiz(Socket, ?RCVBUF_DEFAULT),
   %% Our fates are linked.
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
@@ -124,7 +135,7 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
-  case gen_socket:recv(Socket, 8192) of
+  case gen_socket:recv(Socket, ?RECV_SIZE) of
     {ok, Data} ->
       Msg = netlink:nl_ct_dec(Data),
       case Msg of
@@ -188,7 +199,6 @@ nfnl_query2(Socket, Query) ->
   Request = netlink:nl_ct_enc(Query),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
   Answer = gen_socket:recv(Socket, 8192),
-  %lager:debug("Answer: ~p~n", [Answer]),
   case Answer of
     {ok, Reply} ->
       lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
@@ -217,31 +227,44 @@ socket(Family, Type, Protocol, Opts) ->
       gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
 
+-spec(try_mapping(#mapping{}, gen_socket:socket()) -> ok | {error, Reason :: term()}).
 try_mapping(Mapping, Socket) ->
-
   Msg = build_ctnetlink_msg_create(Mapping),
-  Status = nfnl_query2(Socket, Msg),
+  Status = nfnl_query(Socket, Msg),
   case Status of
-    {error, 2717908991} ->
+    ok ->
+      ok;
+    {error, ?MAYBE_DUPLICATE_CONNTRACK} ->
       retry_mapping(Mapping, Socket);
     {error, Error} ->
-      lager:warning("Mapping Status Error: ~p", [Error]);
+      lager:warning("Mapping Status Error: ~p", [Error]),
+      {error, Error};
     _ ->
-      lager:debug("Mapping Status: ~p", [Status])
+      lager:debug("Mapping Status: ~p", [Status]),
+      {error, unknown}
   end.
 
+-spec(retry_mapping(#mapping{}, gen_socket:socket()) -> ok | {error, Reason :: term()}).
 retry_mapping(Mapping, Socket) ->
+  % Try deleting the "old" mapping - we don't really care
+  % if it suceeds or not
   MsgDelete = build_ctnetlink_msg_delete(Mapping),
-  _DeleteStatus = nfnl_query2(Socket, MsgDelete),
+  _DeleteStatus = nfnl_query(Socket, MsgDelete),
+  % Go back into creating the mapping
   MsgCreate = build_ctnetlink_msg_create(Mapping),
-  CreateStatus = nfnl_query2(Socket, MsgCreate),
+  CreateStatus = nfnl_query(Socket, MsgCreate),
   case CreateStatus of
+    ok ->
+      ok;
     {error, Error} ->
-      lager:warning("Retried Mapping Status Error: ~p", [Error]);
+      lager:warning("Retried Mapping Status Error: ~p", [Error]),
+      {error, Error};
     _ ->
-      lager:debug("Retried Mapping Status: ~p", [CreateStatus])
+      lager:debug("Retried Mapping Status: ~p", [CreateStatus]),
+      {error, unknown}
   end.
 
+-spec(build_ctnetlink_msg_delete(#mapping{}) -> [#ctnetlink{}]).
 build_ctnetlink_msg_delete(Mapping) ->
   Seq = erlang:time_offset() + erlang:monotonic_time(),
   TupleOrig = tuple_orig(Mapping),
@@ -254,6 +277,7 @@ build_ctnetlink_msg_delete(Mapping) ->
   Msg = [#ctnetlink{type = delete, flags = [request, ack], seq = Seq, pid = 0, msg = Cmd}],
   Msg.
 
+-spec(build_ctnetlink_msg_create(#mapping{}) -> [#ctnetlink{}]).
 build_ctnetlink_msg_create(Mapping) ->
   Seq = erlang:time_offset() + erlang:monotonic_time(),
   TupleOrig = tuple_orig(Mapping),
