@@ -100,22 +100,10 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips, vip_counter = VIPCounter}) ->
+handle_call(Args = {get_backend, IP, Port}, _From, State = #state{vips = Vips, vip_counter = VIPCounter}) ->
   lager:debug("Looking up VIP: ~p:~p", [IP, Port]),
   %% We assume, and only support tcp right now
-  case dict:find({tcp, IP, Port}, Vips) of
-    {ok, []} ->
-      %% This should never happen, but it's better than crashing
-      {reply, error, State};
-    {ok, Value} ->
-      VIPCounter1 = dict:update_counter({tcp, IP, Port}, 1, VIPCounter),
-      Counter = dict:fetch({tcp, IP, Port}, VIPCounter1),
-      Offset = (Counter rem erlang:length(Value)) + 1,
-      Backend = lists:nth(Offset, Value),
-      {reply, {ok, Backend}, State#state{vip_counter = VIPCounter1}};
-    error ->
-      {reply, error, State}
-  end;
+  choose_backend(IP, Port, State);
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -167,6 +155,32 @@ handle_info(_Info, State) ->
   State :: #state{}) -> term()).
 terminate(_Reason, _State) ->
   ok.
+
+choose_backend(IP, Port, State) ->
+  choose_backend(IP, Port, State, 3).
+
+choose_backend(IP, Port, State = #state{vips = Vips, vip_counter = VIPCounter}, RetriesLeft) ->
+  case dict:find({tcp, IP, Port}, Vips) of
+    {ok, []} ->
+      %% This should never happen, but it's better than crashing
+      {reply, error, State};
+    {ok, Value} ->
+      VIPCounter1 = dict:update_counter({tcp, IP, Port}, 1, VIPCounter),
+      Counter = dict:fetch({tcp, IP, Port}, VIPCounter1),
+      Offset = (Counter rem erlang:length(Value)) + 1,
+      Backend = lists:nth(Offset, Value),
+      %% TODO(tyler) this doesn't work yet. Try to pull in ideas from Finagle's P2C LB, based on
+      %% The Power of Two Choices in Randomized Load Balancing, Mitzenmacher 2001
+      case ets:lookup(unreplied_backends, Backend) of
+        [{_, Count}]  when Count > 10, RetriesLeft > 0 ->
+          lager:debug("picking new backend since ~p has at least ~p in-flight", [Backend, Count]),
+          choose_backend(IP, Port, State);
+        _ ->
+          {reply, {ok, Backend}, State#state{vip_counter = VIPCounter1}}
+      end;
+    error ->
+      {reply, error, State}
+  end.
 
 %%--------------------------------------------------------------------
 %% @private

@@ -74,6 +74,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  ets:new(unreplied_backends, [public, named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
@@ -82,7 +83,6 @@ init([]) ->
   ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, 57108864),
   ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_NEW),
   ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_UPDATE),
-  ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_DESTROY),
   ok = gen_socket:input_event(Socket, true),
   {ok, #state{socket = Socket}}.
 
@@ -102,10 +102,8 @@ init([]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call({handle_mapping, Mapping}, _From, State = #state{socket = Socket}) ->
-  lager:warning("in handle call"),
   {reply, ok, State};
 handle_call(_Request, _From, State) ->
-  lager:warning("in handle call"),
   {reply, ok, State}.
 
 %%--------------------------------------------------------------------
@@ -120,7 +118,6 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast(_Request, State) ->
-  lager:warning("in handle cast"),
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -149,7 +146,6 @@ handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
   {noreply, State};
 
 handle_info(_Info, State) ->
-  lager:warning("in handle info 2"),
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -181,7 +177,6 @@ terminate(_Reason, _State = #state{socket = Socket}) ->
   Extra :: term()) ->
   {ok, NewState :: #state{}} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
-  lager:warning("in code change"),
   {ok, State}.
 
 %%%===================================================================
@@ -196,24 +191,28 @@ socket(Family, Type, Protocol, Opts) ->
       gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
 
-handle_conn({ctnetlink,Action,Flags,0,0,{inet,0,0,[{tuple_orig,Orig},
-                                                    {tuple_reply,Reply},
-                                                    {id,ID},
-                                                    {status,Status}]}}) ->
-  ok;
-handle_conn({ctnetlink,Action,Flags,0,0,{inet,0,0,[{tuple_orig,Orig},
-                                                    {tuple_reply,Reply},
-                                                    {id,ID},
-                                                    {status,Status},
-                                                    {timeout,_Timeout}]}}) ->
-  ok;
-handle_conn({ctnetlink,Action,Flags,0,0,{inet,0,0,[{tuple_orig,Orig},
-                                                    {tuple_reply,Reply},
-                                                    {id,ID},
-                                                    {status,Status},
-                                                    {timeout,_Timeout},
-                                                    {protoinfo,_ProtoInfo}]}}) ->
-  ok;
-handle_conn(Other) ->
-  lager:warning("retry detector got interesting info: ~p", [Other]).
+handle_conn(#ctnetlink{type = Type, msg = {inet,_,_,[{tuple_orig,Orig},
+                                                     {tuple_reply,Reply},
+                                                     {id,ID},
+                                                     {status,Status} | _Rest]}}) ->
+  mark_replied(fmt_net(Reply), Status),
+  ok.
 
+mark_replied({_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
+  case lists:member(seen_reply, Status) of
+    true ->
+      lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
+      ets:delete(unreplied_backends, {DstIP, DstPort});
+    false ->
+      lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
+      ets:update_counter(unreplied_backends, {DstIP, DstPort}, 1, {{DstIP, DstPort}, 0})
+  end.
+
+fmt_net([{ip,
+         [{v4_src,SrcIP},
+          {v4_dst,DstIP}]},
+        {proto,
+         [{num,Proto},
+          {src_port,SrcPort},
+          {dst_port,DstPort}]}]) ->
+  {Proto, SrcIP, SrcPort, DstIP, DstPort}.
