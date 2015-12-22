@@ -1,6 +1,6 @@
 %%%-------------------------------------------------------------------
-%%% @author sdhillon
-%%% @copyright (C) 2015, <COMPANY>
+%%% @author sdhillon, Tyler Neely
+%%% @copyright (C) 2015, Mesosphere
 %%% @doc
 %%%
 %%% @end
@@ -8,9 +8,17 @@
 %%%-------------------------------------------------------------------
 -module(minuteman_config).
 -author("sdhillon").
+-author("Tyler Neely").
 
 %% API
--export([master_uri/0, poll_interval/0, queue/0, networking/0]).
+-export([master_uri/0,
+  poll_interval/0,
+  queue/0,
+  networking/0,
+  tcp_connect_threshold/0,
+  tcp_consecutive_failure_threshold/0,
+  tcp_failed_backend_backoff_period/0
+  ]).
 
 
 master_uri() ->
@@ -19,6 +27,17 @@ master_uri() ->
 
 poll_interval() ->
   application:get_env(minuteman, poll_interval, 5000).
+
+
+tcp_connect_threshold() ->
+  application:get_env(minuteman, tcp_connect_threshold, 2000).
+
+tcp_consecutive_failure_threshold() ->
+  application:get_env(minuteman, tcp_consecutive_failure_threshold, 5).
+
+tcp_failed_backend_backoff_period() ->
+  application:get_env(minuteman, tcp_failed_backend_backoff_period, 30000).
+
 
 %% Returns a integer
 queue() ->

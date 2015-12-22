@@ -1,19 +1,18 @@
 %%%-------------------------------------------------------------------
-%%% @author sdhillon, Tyler Neely
+%%% @author Tyler Neely
 %%% @copyright (C) 2015, Mesosphere
 %%% @doc
 %%%
 %%% @end
-%%% Created : 08. Dec 2015 9:15 PM
+%%% Created : 08. Dec 2015 11:44 PM
 %%%-------------------------------------------------------------------
--module(minuteman_vip_server).
--author("sdhillon").
+-module(minuteman_conn_latency_observer).
 -author("Tyler Neely").
 
 -behaviour(gen_server).
 
 %% API
--export([stop/0, start_link/0, push_vips/1, get_backend/1, get_backend/2]).
+-export([start_link/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -23,37 +22,29 @@
   terminate/2,
   code_change/3]).
 
+-include_lib("gen_socket/include/gen_socket.hrl").
+-include_lib("gen_netlink/include/netlink.hrl").
 -include("enfhackery.hrl").
 
--ifdef(TEST).
--include_lib("proper/include/proper.hrl").
--include_lib("eunit/include/eunit.hrl").
--export([initial_state/0, command/1, precondition/2, postcondition/3, next_state/3]).
--endif.
+-define(NFQNL_COPY_PACKET, 2).
+
+-define(NFNLGRP_CONNTRACK_NEW, 1).
+-define(NFNLGRP_CONNTRACK_UPDATE, 2).
+-define(NFNLGRP_CONNTRACK_DESTROY, 3).
+-define(NFNLGRP_CONNTRACK_EXP_NEW, 4).
+-define(NFNLGRP_CONNTRACK_EXP_UPDATE, 5).
+-define(SOL_NETLINK, 270).
+-define(NETLINK_ADD_MEMBERSHIP, 1).
+
+-define(RCVBUF_DEFAULT, 212992).
 
 -define(SERVER, ?MODULE).
 
--record(state, {vips = dict:new()}).
-
--type vips() :: dict:dict().
--type ip_port() :: {tuple(), integer()}.
+-record(state, {socket = erlang:error() :: gen_socket:socket()}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-get_backend(IP, Port) ->
-  get_backend({IP, Port}).
-get_backend({IP, Port}) when is_tuple(IP) andalso is_integer(Port) ->
-  gen_server:call(?SERVER, {get_backend, IP, Port}).
-
-push_vips(Vips) ->
-  lager:debug("Pushing Vips: ~p", [Vips]),
-  VipDict = dict:from_list(Vips),
-  gen_server:cast(?SERVER, {push_vips, VipDict}),
-  ok.
-
-stop() ->
-  gen_server:call(?MODULE, stop).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -81,11 +72,21 @@ start_link() ->
 %%                     {stop, Reason}
 %% @end
 %%--------------------------------------------------------------------
--spec(init(Args :: term()) ->
+-spec(init(term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  {ok, #state{}}.
+  ets:new(connection_timers, [named_table]),
+  {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
+  {gen_socket, RealPort, _, _, _, _} = Socket,
+  erlang:link(RealPort),
+  ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
+  ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, 57108864),
+  ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_NEW),
+  ok = gen_socket:setsockopt(Socket, ?SOL_NETLINK, ?NETLINK_ADD_MEMBERSHIP, ?NFNLGRP_CONNTRACK_UPDATE),
+  netlink:rcvbufsiz(Socket, ?RCVBUF_DEFAULT),
+  ok = gen_socket:input_event(Socket, true),
+  {ok, #state{socket = Socket}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -102,9 +103,6 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips}) ->
-  lager:debug("Looking up VIP: ~p:~B", [IP, Port]),
-  {reply, choose_backend(IP, Port, Vips), State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -119,8 +117,6 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_cast({push_vips, Vips}, State) ->
-  {noreply, State#state{vips = Vips}};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -138,6 +134,27 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
+  case ets:take(connection_timers, ID) of
+    [{_ID, Time}] ->
+      Success = false,
+      minuteman_ewma:observe(max(os:system_time() - Time, 0), {IP, Port}, Success);
+    _ ->
+      % we've already cleared it
+      ok
+  end,
+  {noreply, State};
+handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
+  case gen_socket:recv(Socket, 8192) of
+    {ok, Data} ->
+      Msg = netlink:nl_ct_dec(Data),
+      lists:foreach(fun handle_conn/1, Msg);
+    Other ->
+      lager:warning("Unknown msg (ct_latency): ~p", [Other])
+  end,
+  ok = gen_socket:input_event(Socket, true),
+  {noreply, State};
+
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -154,27 +171,9 @@ handle_info(_Info, State) ->
 %%--------------------------------------------------------------------
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
   State :: #state{}) -> term()).
-terminate(_Reason, _State) ->
+terminate(_Reason, _State = #state{socket = Socket}) ->
+  gen_socket:close(Socket),
   ok.
-
--spec(choose_backend(inet:ip4_address(), inet:port_number(), vips()) -> term()).
-choose_backend(IP, Port, Vips) ->
-  %% We assume, and only support tcp right now
-  case dict:find({tcp, IP, Port}, Vips) of
-    {ok, []} ->
-      %% This should never happen, but it's better than crashing
-      error;
-    {ok, Backends} ->
-      case minuteman_ewma:pick_backend(Backends) of
-        {ok, Backend} ->
-          {ok, {Backend#backend.ip, Backend#backend.port}};
-        {error, Reason} ->
-          lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Reason]),
-          error
-      end;
-    error ->
-      error
-  end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -193,54 +192,54 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--ifdef(TEST).
 
-proper_test() ->
-  [] = proper:module(?MODULE).
+socket(Family, Type, Protocol, Opts) ->
+  case proplists:get_value(netns, Opts) of
+    undefined ->
+      gen_socket:socket(Family, Type, Protocol);
+    NetNs ->
+      gen_socket:socketat(NetNs, Family, Type, Protocol)
+  end.
 
-initial_state() ->
-  #state{vips = dict:new()}.
+handle_conn(#ctnetlink{msg = {_Family, _, _, Props}}) ->
+  {id, ID} = proplists:lookup(id, Props),
+  {status, Status} = proplists:lookup(status, Props),
+  {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
+  Addresses = fmt_net(Reply),
+  mark_replied(ID, Addresses, Status).
 
-prop_server_works_fine() ->
-    ?FORALL(Cmds, commands(?MODULE),
-            ?TRAPEXIT(
-                begin
-                    ?MODULE:start_link(),
-                    {History, State, Result} = run_commands(?MODULE, Cmds),
-                    ?MODULE:stop(),
-                    ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
-                                        [History, State, Result]),
-                              Result =:= ok)
-                end)).
+mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
+  case lists:member(seen_reply, Status) of
+    true ->
+      lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
+      case ets:take(connection_timers, ID) of
+        [{_ID, Time}] ->
+          Success = true,
+          minuteman_ewma:observe(max(os:system_time() - Time, 0), {DstIP, DstPort}, Success);
+        _ ->
+          % we've already cleared it, or we never saw its initial SYN
+          ok
+      end;
+    false ->
+      minuteman_ewma:set_pending({DstIP, DstPort}),
+      lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
+      % Set up a timer and schedule a connection check at the
+      % configured threshold.
+      ets:insert(connection_timers, {ID, os:system_time()}),
+      timer:send_after(minuteman_config:tcp_connect_threshold(),
+                       {check_conn_connected, {ID, DstIP, DstPort}})
+  end.
 
-precondition(_, _) -> true.
+fmt_net(Props) ->
+  {ip, IPProps} = proplists:lookup(ip, Props),
 
-postcondition(_, _, _) -> true.
+  {v4_src, SrcIP} = proplists:lookup(v4_src, IPProps),
+  {v4_dst, DstIP} = proplists:lookup(v4_dst, IPProps),
 
-next_state(S, V, {call, _, push_vips, [VIPs]}) ->
-      S#state{vips = VIPs};
-next_state(S, _, _) ->
-  S.
+  {proto, ProtoProps} = proplists:lookup(proto, Props),
 
-ip() ->
-  ?LET({I1, I2, I3, I4},
-       {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
-       {I1, I2, I3, I4}).
+  {num, Proto} = proplists:lookup(num, ProtoProps),
+  {src_port, SrcPort} = proplists:lookup(src_port, ProtoProps),
+  {dst_port, DstPort} = proplists:lookup(dst_port, ProtoProps),
 
-ip_port() ->
-  ?LET({IP, Port},
-       {ip(), integer(0, 65535)},
-       {IP, Port}).
-
-vip() ->
-  ?LET({VIP, Backend}, {ip_port(), ip_port()}, {VIP, Backend}).
-
-vips() ->
-  ?LET(VIPsBackends, list(vip()), lists:foldl(fun({K, V}, Acc) ->
-                                                  orddict:append(K, V, Acc)
-                                              end, orddict:new(), VIPsBackends)).
-command(_S) ->
-    oneof([{call, ?MODULE, get_backend, [ip_port()]},
-           {call, ?MODULE, push_vips, [vips()]}]).
-
--endif.
+  {Proto, SrcIP, SrcPort, DstIP, DstPort}.
