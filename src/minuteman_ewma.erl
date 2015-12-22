@@ -31,7 +31,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {i}).
+-record(state, {}).
 
 %%%===================================================================
 %%% API
@@ -50,9 +50,9 @@ set_pending({IP, Port}) ->
 %% 10 (October 2001), 1094-1104.
 %% @end
 %%--------------------------------------------------------------------
--spec(pick_backend(list(#backend{})) -> {ok, #backend{}} | {error, string()}).
+-spec(pick_backend(list(#backend{})) -> {ok, #backend{}} | {error, atom()}).
 pick_backend([]) ->
-  {error, "No backends available."};
+  {error, no_backends_available};
 pick_backend(Backends) ->
   gen_server:call(?SERVER, {pick_backend, Backends}).
 
@@ -124,7 +124,7 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast({observe, {Time, {IP, Port}, Success}}, State) ->
-  lager:debug("Observing connection success: ~p with time of ~p ms", [Success, Time / 1.0e6]),
+  lager:debug("Observing connection success: ~p with time of ~B ms", [Success, Time / 1.0e6]),
   Backend = get_ewma_or_default({IP, Port}),
   Ewma = Backend#backend.ewma,
   ObservedEwma = observe(Time, Ewma),
@@ -229,7 +229,9 @@ cost(#backend{ewma = Ewma}) ->
   % amount of time that has passed since the last measurement.
   #ewma{cost = Cost, pending = Pending, penalty = Penalty} = observe(0.0, Ewma),
   case {Cost, Penalty} of
-    {0, P} when P /= 0 ->
+    {0, 0} ->
+      Cost * (Pending + 1);
+    {0, _} ->
       Penalty + Pending;
     _ ->
       Cost * (Pending + 1)
@@ -297,39 +299,46 @@ pick_backend_internal(BackendAddrs) ->
                                end, Backends),
 
   % If there are no backends up, may as well try one that's down.
-  Choices = case length(Up) > 0 of
-              true -> Up;
-              false -> Down
+  Choices = case Up of
+              [] ->
+                Down;
+              _ ->
+                Up
             end,
 
   % If there's only one choice, use it.  Otherwise, try to get two
   % different random selections and pick the one with the better
   % cost.
-  Size = length(Choices),
-  case Size of
-    1 -> {ok, lists:nth(1, Choices)};
+  case Choices of
+    [Choice] ->
+      {ok, Choice};
     _ ->
+      Size = length(Choices),
       A = rand:uniform(Size),
       B = try_different_rand(Size, A, 10),
 
       BackendA = lists:nth(A, Choices),
       BackendB = lists:nth(B, Choices),
 
-      case cost(BackendA) < cost(BackendB) of
-        true -> {ok, BackendA};
-        false -> {ok, BackendB}
-      end
+      Choice = choose_backend_by_cost(BackendA, BackendB),
+      {ok, Choice}
+  end.
+
+-spec(choose_backend_by_cost(#backend{}, #backend{}) -> #backend{}).
+choose_backend_by_cost(A, B) ->
+  case cost(A) < cost(B) of
+    true -> A;
+    false -> B
   end.
 
 -spec(try_different_rand(integer(), integer(), integer()) -> integer()).
 try_different_rand(_Max, Other, 0) ->
   Other;
 try_different_rand(Max, Other, TriesLeft) ->
-  R = rand:uniform(Max),
-  case R == Other of
-    true ->
+  case rand:uniform(Max) of
+    Other ->
       try_different_rand(Max, Other, TriesLeft - 1);
-    false ->
+    R ->
       R
   end.
 

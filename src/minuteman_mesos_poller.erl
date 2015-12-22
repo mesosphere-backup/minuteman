@@ -272,7 +272,7 @@ vip_permutations(IPs, _Status, Ports, Labels, AccIn) ->
                                    Port = lists:nth(Offset + 1, PortList),
                                    [{Port, VIP}];
                                  false ->
-                                   lager:warning("Could not parse VIP spec: port index ~p too high for VIP ~p",
+                                   lager:warning("Could not parse VIP spec: port index ~B too high for VIP ~p",
                                                  [Offset, VIP]),
                                    []
                                end
@@ -347,7 +347,7 @@ normalize_vip(<<"tcp://", Rest/binary>>) ->
 normalize_vip(<<"udp://", Rest/binary>>) ->
   parse_host_port(udp, Rest);
 normalize_vip(E) ->
-  {error, "bad VIP specification: " ++ E}.
+  {error, {bad_vip_specification, E}}.
 
 parse_host_port(Proto, Rest) ->
   RestStr = binary_to_list(Rest),
@@ -355,7 +355,7 @@ parse_host_port(Proto, Rest) ->
     [HostStr, PortStr] ->
       parse_host_port(Proto, HostStr, PortStr);
     _ ->
-      {error, "bad VIP specification: " ++ Rest}
+      {error, {bad_vip_specification, Rest}}
   end.
 
 parse_host_port(Proto, HostStr, PortStr) ->
@@ -363,13 +363,13 @@ parse_host_port(Proto, HostStr, PortStr) ->
     {ok, Host} ->
       parse_host_port_2(Proto, Host, PortStr);
     {error, einval} ->
-      {error, "Bad host string: " ++ HostStr}
+      {error, {bad_host_string, HostStr}}
   end.
 
 parse_host_port_2(Proto, Host, PortStr) ->
   case string_to_integer(PortStr) of
     error ->
-      {error, "Bad port string: " ++ PortStr};
+      {error, {bad_port_string, PortStr}};
     Port ->
       {Proto, Host, Port}
   end.
