@@ -32,17 +32,20 @@
   }).
 
 -record(ewma, {
-  cost = 0,                 % Current value of the exponentially
-                            % weighted moving average.
+  % Current value of the exponentially weighted moving average.
+  cost = 0,
 
-  stamp = os:system_time(), % Used to measure the length of the
-                            % exponential sliding window.
+  % Used to measure the length of the exponential sliding window.
+  stamp = erlang:monotonic_time(),
 
-  penalty = 1.0e307,        % A large number for penalizing new
-                            % backends, to ease up rates slowly.
+  % A large number for penalizing new backends, to ease up rates slowly.
+  penalty = 1.0e307,
 
-  pending = 0,              % Number of in-flight measurements.
-  decay = 10.0e9            % 10 seconds in nanoseconds.
+  % Number of in-flight measurements.
+  pending = 0,
+
+  % 10 seconds in nanoseconds.
+  decay = 10.0e9
   }).
 
 -record(backend, {
