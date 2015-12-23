@@ -141,9 +141,9 @@ handle_cast(_Request, State) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
   case ets:take(connection_timers, ID) of
-    [{_ID, TimerID, Time}] ->
+    [{_ID, TimerID, StartTime}] ->
       Success = false,
-      minuteman_ewma:observe(erlang:monotonic_time() - Time,
+      minuteman_ewma:observe(erlang:monotonic_time() - StartTime,
                              {IP, Port},
                              Success),
       timer:cancel(TimerID);
@@ -221,9 +221,9 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
     true ->
       lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
       case ets:take(connection_timers, ID) of
-        [{_ID, TimerID, Time}] ->
+        [{_ID, TimerID, StartTime}] ->
           Success = true,
-          minuteman_ewma:observe(erlang:monotonic_time() - Time,
+          minuteman_ewma:observe(erlang:monotonic_time() - StartTime,
                                  {DstIP, DstPort},
                                  Success),
           timer:cancel(TimerID);

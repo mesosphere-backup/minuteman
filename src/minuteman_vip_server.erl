@@ -36,7 +36,6 @@
 -record(state, {vips = dict:new()}).
 
 -type vips() :: dict:dict().
--type ip_port() :: {tuple(), integer()}.
 
 %%%===================================================================
 %%% API

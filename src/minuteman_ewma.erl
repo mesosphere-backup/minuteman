@@ -45,7 +45,7 @@
 
 -record(state, {}).
 
--type ip_port() :: {tuple(), integer()}.
+-type ip_port() :: {inet:ip4_address(), integer()}.
 
 %%%===================================================================
 %%% API
