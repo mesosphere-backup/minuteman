@@ -23,7 +23,7 @@
   terminate/2,
   code_change/3]).
 
--include("enfhackery.hrl").
+-include("minuteman.hrl").
 
 -ifdef(TEST).
 -include_lib("proper/include/proper.hrl").
@@ -36,7 +36,6 @@
 -record(state, {vips = dict:new()}).
 
 -type vips() :: dict:dict().
--type ip_port() :: {tuple(), integer()}.
 
 %%%===================================================================
 %%% API
@@ -167,7 +166,7 @@ choose_backend(IP, Port, Vips) ->
     {ok, Backends} ->
       case minuteman_ewma:pick_backend(Backends) of
         {ok, Backend} ->
-          {ok, {Backend#backend.ip, Backend#backend.port}};
+          {ok, Backend#backend.ip_port};
         {error, Reason} ->
           lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Reason]),
           error
@@ -217,7 +216,7 @@ precondition(_, _) -> true.
 
 postcondition(_, _, _) -> true.
 
-next_state(S, V, {call, _, push_vips, [VIPs]}) ->
+next_state(S, _V, {call, _, push_vips, [VIPs]}) ->
       S#state{vips = VIPs};
 next_state(S, _, _) ->
   S.

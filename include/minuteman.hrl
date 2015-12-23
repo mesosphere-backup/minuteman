@@ -20,12 +20,6 @@
   new_dst_port
   }).
 
--record(backend_stats, {
-  pending_conns,
-  established_conns,
-  creation_time
-  }).
-
 -record(backend_tracking, {
   % current count of consecutive failures
   consecutive_failures = 0,
@@ -38,25 +32,30 @@
   }).
 
 -record(ewma, {
-  cost = 0,                 % Current value of the exponentially
-                            % weighted moving average.
+  % Current value of the exponentially weighted moving average.
+  cost = 0,
 
-  stamp = os:system_time(), % Used to measure the length of the
-                            % exponential sliding window.
+  % Used to measure the length of the exponential sliding window.
+  stamp = erlang:monotonic_time(nano_seconds),
 
-  penalty = 1.0e307,        % A large number for penalizing new
-                            % backends, to ease up rates slowly.
+  % A large number for penalizing new backends, to ease up rates slowly.
+  penalty = 1.0e307,
 
-  pending = 0,              % Number of in-flight measurements.
-  decay = 10.0e9            % 10 seconds in nanoseconds.
+  % Number of in-flight measurements.
+  pending = 0,
+
+  % 10 seconds in nanoseconds.
+  decay = 10.0e9
   }).
 
 -record(backend, {
-  ip,
-  port,
+  ip_port :: ip_port(),
+  clock = fun () -> erlang:monotonic_time(nano_seconds) end,
   tracking = #backend_tracking{},
   ewma = #ewma{}
   }).
 
 -define(SERVER_NAME_WITH_NUM(Num),
   list_to_atom(lists:flatten([?MODULE_STRING, "_", integer_to_list(Num)]))).
+
+-type ip_port() :: {inet:ip4_address(), integer()}.

@@ -32,7 +32,7 @@
 
 -include_lib("kernel/include/inet.hrl").
 
--include("enfhackery.hrl").
+-include("minuteman.hrl").
 
 -define(REFRESH_INTERVAL, 5000).
 -record(state, {local_addrs = erlang:error(), num = erlang:error() :: non_neg_integer()}).

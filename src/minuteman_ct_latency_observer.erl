@@ -24,7 +24,7 @@
 
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
--include("enfhackery.hrl").
+-include("minuteman.hrl").
 
 -define(NFQNL_COPY_PACKET, 2).
 
@@ -38,9 +38,20 @@
 
 -define(RCVBUF_DEFAULT, 212992).
 
+-ifdef(TEST).
+-include_lib("proper/include/proper.hrl").
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -define(SERVER, ?MODULE).
 
 -record(state, {socket = erlang:error() :: gen_socket:socket()}).
+
+-record(ct_timer, {
+  id :: integer(),
+  timer_id :: timer:tref(),
+  start_time :: integer()
+  }).
 
 %%%===================================================================
 %%% API
@@ -76,7 +87,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  ets:new(connection_timers, [named_table]),
+  ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
@@ -136,9 +147,13 @@ handle_cast(_Request, State) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
   case ets:take(connection_timers, ID) of
-    [{_ID, Time}] ->
+    [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
+      TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
+      timer:cancel(TimerID),
       Success = false,
-      minuteman_ewma:observe(max(os:system_time() - Time, 0), {IP, Port}, Success);
+      minuteman_ewma:observe(TimeDelta,
+                             {IP, Port},
+                             Success);
     _ ->
       % we've already cleared it
       ok
@@ -213,9 +228,13 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
     true ->
       lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
       case ets:take(connection_timers, ID) of
-        [{_ID, Time}] ->
+        [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
+          TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
+          timer:cancel(TimerID),
           Success = true,
-          minuteman_ewma:observe(max(os:system_time() - Time, 0), {DstIP, DstPort}, Success);
+          minuteman_ewma:observe(TimeDelta,
+                                 {DstIP, DstPort},
+                                 Success);
         _ ->
           % we've already cleared it, or we never saw its initial SYN
           ok
@@ -225,9 +244,11 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
       lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
       % Set up a timer and schedule a connection check at the
       % configured threshold.
-      ets:insert(connection_timers, {ID, os:system_time()}),
-      timer:send_after(minuteman_config:tcp_connect_threshold(),
-                       {check_conn_connected, {ID, DstIP, DstPort}})
+      {ok, TimerID} = timer:send_after(minuteman_config:tcp_connect_threshold(),
+                                       {check_conn_connected, {ID, DstIP, DstPort}}),
+      ets:insert(connection_timers, #ct_timer{id = ID,
+                                              timer_id = TimerID,
+                                              start_time = erlang:monotonic_time(nano_seconds)})
   end;
 mark_replied(_, _, _) ->
   %% unsupported proto (udp, icmp, sctp...)
@@ -251,4 +272,3 @@ fmt_net(Props) ->
     _ ->
       {error, unsupported_proto}
   end.
-

@@ -12,8 +12,8 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
--export([observe/3,
+-export([start_link/0,
+  observe/3,
   set_pending/1,
   pick_backend/1
   ]).
@@ -27,7 +27,19 @@
   code_change/3]).
 
 
--include("enfhackery.hrl").
+-include("minuteman.hrl").
+
+-ifdef(TEST).
+-export([initial_state/0,
+  stop/0,
+  command/1,
+  precondition/2,
+  postcondition/3,
+  next_state/3
+  ]).
+-include_lib("proper/include/proper.hrl").
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 -define(SERVER, ?MODULE).
 
@@ -36,8 +48,8 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-observe(Time, {IP, Port}, Success) ->
-  gen_server:cast(?SERVER, {observe, {Time, {IP, Port}, Success}}).
+observe(Measurement, {IP, Port}, Success) ->
+  gen_server:cast(?SERVER, {observe, {Measurement, {IP, Port}, Success}}).
 
 set_pending({IP, Port}) ->
   gen_server:cast(?SERVER, {set_pending, {IP, Port}}).
@@ -50,7 +62,7 @@ set_pending({IP, Port}) ->
 %% 10 (October 2001), 1094-1104.
 %% @end
 %%--------------------------------------------------------------------
--spec(pick_backend(list(#backend{})) -> {ok, #backend{}} | {error, atom()}).
+-spec(pick_backend(list(ip_port())) -> {ok, #backend{}} | {error, atom()}).
 pick_backend([]) ->
   {error, no_backends_available};
 pick_backend(Backends) ->
@@ -89,7 +101,7 @@ init([]) ->
   random:seed(erlang:phash2([node()]),
               erlang:monotonic_time(),
               erlang:unique_integer()),
-  ets:new(connection_ewma, [public, named_table]),
+  ets:new(connection_ewma, [{keypos, #backend.ip_port}, named_table]),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -109,6 +121,9 @@ init([]) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call({pick_backend, Backends}, _From, State) ->
   {reply, pick_backend_internal(Backends), State};
+handle_call(clear, _From, State) ->
+  ets:delete_all_objects(connection_ewma),
+  {reply, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -123,11 +138,12 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_cast({observe, {Time, {IP, Port}, Success}}, State) ->
-  lager:debug("Observing connection success: ~p with time of ~B ms", [Success, Time / 1.0e6]),
+handle_cast({observe, {Measurement, {IP, Port}, Success}}, State) ->
+  lager:debug("Observing connection success: ~p with time of ~B ms", [Success, Measurement / 1.0e6]),
   Backend = get_ewma_or_default({IP, Port}),
   Ewma = Backend#backend.ewma,
-  ObservedEwma = observe(Time, Ewma),
+  Clock = Backend#backend.clock,
+  ObservedEwma = observe_internal(Measurement, Clock(), Ewma),
   NewEwma =  decrement_pending(ObservedEwma),
 
   Tracking = Backend#backend.tracking,
@@ -135,14 +151,14 @@ handle_cast({observe, {Time, {IP, Port}, Success}}, State) ->
 
   NewBackend = Backend#backend{ewma = NewEwma,
                               tracking = NewTracking},
-  ets:insert(connection_ewma, {{IP, Port}, NewBackend}),
+  ets:insert(connection_ewma, NewBackend),
   {noreply, State};
 
 handle_cast({set_pending, {IP, Port}}, State) ->
   Backend = get_ewma_or_default({IP, Port}),
   NewEwma = increment_pending(Backend#backend.ewma),
   NewBackend = Backend#backend{ewma = NewEwma},
-  ets:insert(connection_ewma, {{IP, Port}, NewBackend}),
+  ets:insert(connection_ewma, NewBackend),
   {noreply, State};
 
 handle_cast(_Request, State) ->
@@ -205,16 +221,15 @@ code_change(_OldVsn, State, _Extra) ->
 %% not have to assume a constant request rate to a particular service.
 %% @end
 %%--------------------------------------------------------------------
--spec(observe(Val :: float(), _Ewma :: #ewma{}) -> #ewma{}).
-observe(Val, Ewma = #ewma{cost = Cost,
-                          stamp = Stamp,
-                          decay = Decay}) ->
-  Now = os:system_time(),
-  TD = max(Now - Stamp, 0),
-  W = math:exp(-TD / Decay),
+-spec(observe_internal(Val :: float(), Now :: float(), _Ewma :: #ewma{}) -> #ewma{}).
+observe_internal(Val, Now, Ewma = #ewma{cost = Cost,
+                               stamp = Stamp,
+                               decay = Decay}) ->
+  TimeDelta = max(Now - Stamp, 0),
+  Weight = math:exp(-TimeDelta / Decay),
   NewCost = case Val > Cost of
               true -> Val;
-              false -> (Cost * W) + (Val * (1.0-W))
+              false -> (Cost * Weight) + (Val * (1.0-Weight))
             end,
   Ewma#ewma{stamp = Now, cost = NewCost}.
 
@@ -224,14 +239,14 @@ observe(Val, Ewma = #ewma{cost = Cost,
 %% @end
 %%--------------------------------------------------------------------
 -spec(cost(#backend{}) -> float()).
-cost(#backend{ewma = Ewma}) ->
+cost(#backend{clock = Clock, ewma = Ewma}) ->
   % We observe 0 here to slide the exponential window forward by the
   % amount of time that has passed since the last measurement.
-  #ewma{cost = Cost, pending = Pending, penalty = Penalty} = observe(0.0, Ewma),
-  case {Cost, Penalty} of
-    {0, 0} ->
+  #ewma{cost = Cost, pending = Pending, penalty = Penalty} = observe_internal(0.0, Clock(), Ewma),
+  case {float(Cost), float(Penalty)} of
+    {0.0, 0.0} ->
       Cost * (Pending + 1);
-    {0, _} ->
+    {0.0, _} ->
       Penalty + Pending;
     _ ->
       Cost * (Pending + 1)
@@ -249,7 +264,7 @@ is_open(#backend_tracking{consecutive_failures = Failures,
   true;
 is_open(#backend_tracking{last_failure_time = Last,
                           failure_backoff = Backoff}) ->
-  Now = os:system_time(),
+  Now = erlang:monotonic_time(nano_seconds),
   (Now - Last) > Backoff.
 
 %%--------------------------------------------------------------------
@@ -270,7 +285,7 @@ track_success(false, Tracking) ->
 %%--------------------------------------------------------------------
 -spec(add_failure(BT :: #backend_tracking{}) -> #backend_tracking{}).
 add_failure(BT = #backend_tracking{consecutive_failures = Failures}) ->
-  Now = os:system_time(),
+  Now = erlang:monotonic_time(nano_seconds),
   BT#backend_tracking{consecutive_failures = Failures + 1,
                       last_failure_time = Now}.
 
@@ -347,5 +362,146 @@ get_ewma_or_default({IP, Port}) ->
     [{_Addr, ExistingBackend}] ->
       ExistingBackend;
     _ ->
-      #backend{ip = IP, port = Port}
+      #backend{ip_port = {IP, Port}}
   end.
+
+-ifdef(TEST).
+
+-record(test_state, {known_vips = sets:new()}).
+
+stop() ->
+  gen_server:call(?MODULE, clear).
+
+proper_test() ->
+  [] = proper:module(?MODULE).
+
+%% Properties of EWMA:
+%%  * weight increases with pending
+%%  * when new or completely cold, has a high cost
+%%  * cost drops with low observations
+%%  * cost rises with high observations
+
+ewma() ->
+  ?LET({Cost, Pending},
+       {non_neg_integer(), pos_integer()},
+       #ewma{cost = Cost, pending = Pending}).
+
+prop_ewma_cost_increases_with_pending() ->
+  ?FORALL({Higher, Lower, Ewma},
+          ?SUCHTHAT({Higher, Lower, _Ewma},
+                    {non_neg_integer(), non_neg_integer(), ewma()},
+                    Higher > Lower),
+          ewma_cost_increases_with_pending(Higher, Lower, Ewma)).
+
+ewma_cost_increases_with_pending(Higher, Lower, Ewma) ->
+  Now = erlang:monotonic_time(nano_seconds),
+  [BackendA, BackendB] = lists:map(fun (I) ->
+                                       #backend{ewma = Ewma#ewma{pending = I},
+                                                clock = fun () -> Now end}
+                                   end, [Higher, Lower]),
+  %% We use inclusive bounds on both ends because large numbers
+  %% (penalty is 1.0e307) will compare like this:
+  %%    > 1.0e307 + 1 =:= 1.0e307.
+  %%    true
+  cost(BackendA) >= cost(BackendB).
+
+prop_ewma_cost_decreases_with_time() ->
+  ?FORALL({Higher, Lower, Ewma},
+          ?SUCHTHAT({Higher, Lower, _Ewma},
+                    {non_neg_integer(), non_neg_integer(), ewma()},
+                    Higher > Lower),
+          ewma_cost_decreases_with_time(Higher, Lower, Ewma)).
+
+ewma_cost_decreases_with_time(Higher, Lower, Ewma) ->
+  [BackendA, BackendB] = lists:map(fun (I) ->
+                                       #backend{ewma = Ewma,
+                                                clock = fun () -> I end}
+                                   end, [Higher, Lower]),
+  cost(BackendA) =< cost(BackendB).
+
+prop_ewma_cost_decreases_with_low_measurements() ->
+  ?FORALL(Ewma, ewma(), ewma_cost_decreases_with_low_measurements(Ewma)).
+
+ewma_cost_decreases_with_low_measurements(Ewma) ->
+  Backend = #backend{ewma = Ewma},
+  Clock = Backend#backend.clock,
+  Initial = cost(Backend),
+  Later = lists:foldl(fun (_E, AccIn) ->
+                          observe_internal(0, Clock(), AccIn)
+                      end,
+                      Ewma,
+                      lists:seq(1, 10)),
+  cost(#backend{ewma = Later}) =< Initial.
+
+prop_ewma_cost_increases_with_high_measurements() ->
+  ?FORALL(Ewma, ewma(), ewma_cost_increases_with_high_measurements(Ewma)).
+
+ewma_cost_increases_with_high_measurements(InitialEwma) ->
+  Ewma = InitialEwma#ewma{penalty = 0},
+  Backend = #backend{ewma = Ewma},
+  Clock = Backend#backend.clock,
+  Initial = cost(Backend),
+  Higher = lists:foldl(fun (_E, AccIn) ->
+                          observe_internal(2.0e9, Clock(), AccIn)
+                      end,
+                      Ewma,
+                      lists:seq(1, 10)),
+  cost(#backend{ewma = Higher}) > Initial.
+
+initial_state() ->
+  #test_state{}.
+
+prop_server_works_fine() ->
+  ?FORALL(Cmds, commands(?MODULE),
+          ?TRAPEXIT(
+             begin
+               ?MODULE:start_link(),
+               {History, State, Result} = run_commands(?MODULE, Cmds),
+               ?MODULE:stop(),
+               ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
+                                   [History, State, Result]),
+                         Result =:= ok)
+             end)).
+
+precondition(_, _) -> true.
+
+postcondition(_S, {call, _, pick_backend, [Vips]}, Result) ->
+  pick_backend_postcondition(Vips, Result);
+postcondition(_, _, _) -> true.
+
+pick_backend_postcondition([], {error, no_backends_available}) ->
+  true;
+pick_backend_postcondition(Vips, {ok, #backend{ip_port = {IP, Port}}}) ->
+  lists:member({IP, Port}, Vips);
+pick_backend_postcondition(_, _) ->
+  false.
+
+
+next_state(#test_state{known_vips = KnownVips}, _V, {call, _, observe, [_Measurement, Vip, _Success]}) ->
+  #test_state{known_vips = sets:add_element(Vip, KnownVips)};
+next_state(#test_state{known_vips = KnownVips}, _V, {call, _, set_pending, [Vip]}) ->
+  #test_state{known_vips = sets:add_element(Vip, KnownVips)};
+next_state(S, _V, {call, _, pick_backend, [_Vips]}) ->
+  S;
+next_state(S, _, _) ->
+  S.
+
+ip() ->
+  ?LET({I1, I2, I3, I4},
+       {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
+       {I1, I2, I3, I4}).
+
+ip_port() ->
+  ?LET({IP, Port},
+       {ip(), integer(0, 65535)},
+       {IP, Port}).
+
+
+command(S) ->
+  Vips = sets:to_list(S#test_state.known_vips),
+  VipsPresent = (Vips =/= []),
+  oneof([{call, ?MODULE, observe, [float(), ip_port(), boolean()]},
+         {call, ?MODULE, set_pending, [ip_port()]}] ++
+        [{call, ?MODULE, pick_backend, [list(oneof(Vips))]} || VipsPresent]).
+
+-endif.
