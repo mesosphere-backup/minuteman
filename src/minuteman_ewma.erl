@@ -401,7 +401,7 @@ ewma_cost_increases_with_pending(Higher, Lower, Ewma) ->
                                                 clock = fun () -> Now end}
                                    end, [Higher, Lower]),
   %% We use inclusive bounds on both ends because large numbers
-  %% (penalty is 1.0e307) will compare like this: 
+  %% (penalty is 1.0e307) will compare like this:
   %%    > 1.0e307 + 1 =:= 1.0e307.
   %%    true
   cost(BackendA) >= cost(BackendB).
@@ -431,7 +431,7 @@ ewma_cost_decreases_with_low_measurements(Ewma) ->
                           observe_internal(0, Clock(), AccIn)
                       end,
                       Ewma,
-                      [1,2,3,4,5,6,7,8,9,10]),
+                      lists:seq(1, 10)),
   cost(#backend{ewma = Later}) =< Initial.
 
 initial_state() ->
@@ -451,7 +451,7 @@ prop_server_works_fine() ->
 
 precondition(_, _) -> true.
 
-postcondition(_S, {call,_,pick_backend,[Vips]}, Result) ->
+postcondition(_S, {call, _, pick_backend, [Vips]}, Result) ->
   pick_backend_postcondition(Vips, Result);
 postcondition(_, _, _) -> true.
 
