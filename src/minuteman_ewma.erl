@@ -45,8 +45,6 @@
 
 -record(state, {}).
 
--type ip_port() :: {inet:ip4_address(), integer()}.
-
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -266,7 +264,7 @@ is_open(#backend_tracking{consecutive_failures = Failures,
   true;
 is_open(#backend_tracking{last_failure_time = Last,
                           failure_backoff = Backoff}) ->
-  Now = erlang:monotonic_time(),
+  Now = erlang:monotonic_time(nano_seconds),
   (Now - Last) > Backoff.
 
 %%--------------------------------------------------------------------
@@ -287,7 +285,7 @@ track_success(false, Tracking) ->
 %%--------------------------------------------------------------------
 -spec(add_failure(BT :: #backend_tracking{}) -> #backend_tracking{}).
 add_failure(BT = #backend_tracking{consecutive_failures = Failures}) ->
-  Now = erlang:monotonic_time(),
+  Now = erlang:monotonic_time(nano_seconds),
   BT#backend_tracking{consecutive_failures = Failures + 1,
                       last_failure_time = Now}.
 
@@ -379,8 +377,9 @@ proper_test() ->
 
 %% Properties of EWMA:
 %%  * weight increases with pending
-%%  * when cold, has a high cost
-%%  * when hot, has low cost
+%%  * when new or completely cold, has a high cost
+%%  * cost drops with low observations
+%%  * cost rises with high observations
 
 ewma() ->
   ?LET({Cost, Pending},
@@ -395,7 +394,7 @@ prop_ewma_cost_increases_with_pending() ->
           ewma_cost_increases_with_pending(Higher, Lower, Ewma)).
 
 ewma_cost_increases_with_pending(Higher, Lower, Ewma) ->
-  Now = erlang:monotonic_time(),
+  Now = erlang:monotonic_time(nano_seconds),
   [BackendA, BackendB] = lists:map(fun (I) ->
                                        #backend{ewma = Ewma#ewma{pending = I},
                                                 clock = fun () -> Now end}
@@ -433,6 +432,21 @@ ewma_cost_decreases_with_low_measurements(Ewma) ->
                       Ewma,
                       lists:seq(1, 10)),
   cost(#backend{ewma = Later}) =< Initial.
+
+prop_ewma_cost_increases_with_high_measurements() ->
+  ?FORALL(Ewma, ewma(), ewma_cost_increases_with_high_measurements(Ewma)).
+
+ewma_cost_increases_with_high_measurements(InitialEwma) ->
+  Ewma = InitialEwma#ewma{penalty = 0},
+  Backend = #backend{ewma = Ewma},
+  Clock = Backend#backend.clock,
+  Initial = cost(Backend),
+  Higher = lists:foldl(fun (_E, AccIn) ->
+                          observe_internal(2.0e9, Clock(), AccIn)
+                      end,
+                      Ewma,
+                      lists:seq(1, 10)),
+  cost(#backend{ewma = Higher}) > Initial.
 
 initial_state() ->
   #test_state{}.

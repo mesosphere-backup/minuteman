@@ -36,7 +36,7 @@
   cost = 0,
 
   % Used to measure the length of the exponential sliding window.
-  stamp = erlang:monotonic_time(),
+  stamp = erlang:monotonic_time(nano_seconds),
 
   % A large number for penalizing new backends, to ease up rates slowly.
   penalty = 1.0e307,
@@ -49,11 +49,13 @@
   }).
 
 -record(backend, {
-  ip_port,
-  clock = fun erlang:monotonic_time/0,
+  ip_port :: ip_port(),
+  clock = fun () -> erlang:monotonic_time(nano_seconds) end,
   tracking = #backend_tracking{},
   ewma = #ewma{}
   }).
 
 -define(SERVER_NAME_WITH_NUM(Num),
   list_to_atom(lists:flatten([?MODULE_STRING, "_", integer_to_list(Num)]))).
+
+-type ip_port() :: {inet:ip4_address(), integer()}.

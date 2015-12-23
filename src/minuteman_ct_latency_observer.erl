@@ -47,6 +47,12 @@
 
 -record(state, {socket = erlang:error() :: gen_socket:socket()}).
 
+-record(ct_timer, {
+  id :: integer(),
+  timer_id :: timer:tref(),
+  start_time :: integer()
+  }).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -81,7 +87,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  ets:new(connection_timers, [named_table]),
+  ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
@@ -141,12 +147,13 @@ handle_cast(_Request, State) ->
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
   case ets:take(connection_timers, ID) of
-    [{_ID, TimerID, StartTime}] ->
+    [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
+      TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
+      timer:cancel(TimerID),
       Success = false,
-      minuteman_ewma:observe(erlang:monotonic_time() - StartTime,
+      minuteman_ewma:observe(TimeDelta,
                              {IP, Port},
-                             Success),
-      timer:cancel(TimerID);
+                             Success);
     _ ->
       % we've already cleared it
       ok
@@ -221,12 +228,13 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
     true ->
       lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
       case ets:take(connection_timers, ID) of
-        [{_ID, TimerID, StartTime}] ->
+        [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
+          TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
+          timer:cancel(TimerID),
           Success = true,
-          minuteman_ewma:observe(erlang:monotonic_time() - StartTime,
+          minuteman_ewma:observe(TimeDelta,
                                  {DstIP, DstPort},
-                                 Success),
-          timer:cancel(TimerID);
+                                 Success);
         _ ->
           % we've already cleared it, or we never saw its initial SYN
           ok
@@ -238,7 +246,9 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
       % configured threshold.
       {ok, TimerID} = timer:send_after(minuteman_config:tcp_connect_threshold(),
                                        {check_conn_connected, {ID, DstIP, DstPort}}),
-      ets:insert(connection_timers, {ID, TimerID, erlang:monotonic_time()})
+      ets:insert(connection_timers, #ct_timer{id = ID,
+                                              timer_id = TimerID,
+                                              start_time = erlang:monotonic_time(nano_seconds)})
   end;
 mark_replied(_, _, _) ->
   %% unsupported proto (udp, icmp, sctp...)

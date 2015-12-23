@@ -216,7 +216,7 @@ precondition(_, _) -> true.
 
 postcondition(_, _, _) -> true.
 
-next_state(S, V, {call, _, push_vips, [VIPs]}) ->
+next_state(S, _V, {call, _, push_vips, [VIPs]}) ->
       S#state{vips = VIPs};
 next_state(S, _, _) ->
   S.
