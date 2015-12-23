@@ -38,6 +38,11 @@
 
 -define(RCVBUF_DEFAULT, 212992).
 
+-ifdef(TEST).
+-include_lib("proper/include/proper.hrl").
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -define(SERVER, ?MODULE).
 
 -record(state, {socket = erlang:error() :: gen_socket:socket()}).
@@ -77,6 +82,7 @@ start_link() ->
   {stop, Reason :: term()} | ignore).
 init([]) ->
   ets:new(connection_timers, [named_table]),
+  ets:new(connection_timer_cancel_tokens, [named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
@@ -138,7 +144,11 @@ handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
   case ets:take(connection_timers, ID) of
     [{_ID, Time}] ->
       Success = false,
-      minuteman_ewma:observe(max(os:system_time() - Time, 0), {IP, Port}, Success);
+      minuteman_ewma:observe(erlang:monotonic_time() - Time,
+                             {IP, Port},
+                             Success),
+      [{_ID, TimerID}] = ets:take(connection_timer_cancel_tokens, ID),
+      timer:cancel(TimerID);
     _ ->
       % we've already cleared it
       ok
@@ -215,7 +225,11 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
       case ets:take(connection_timers, ID) of
         [{_ID, Time}] ->
           Success = true,
-          minuteman_ewma:observe(max(os:system_time() - Time, 0), {DstIP, DstPort}, Success);
+          minuteman_ewma:observe(erlang:monotonic_time() - Time,
+                                 {DstIP, DstPort},
+                                 Success),
+          [{_ID, TimerID}] = ets:take(connection_timer_cancel_tokens, ID),
+          timer:cancel(TimerID);
         _ ->
           % we've already cleared it, or we never saw its initial SYN
           ok
@@ -225,9 +239,10 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
       lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
       % Set up a timer and schedule a connection check at the
       % configured threshold.
-      ets:insert(connection_timers, {ID, os:system_time()}),
-      timer:send_after(minuteman_config:tcp_connect_threshold(),
-                       {check_conn_connected, {ID, DstIP, DstPort}})
+      ets:insert(connection_timers, {ID, erlang:monotonic_time()}),
+      {ok, TimerID} = timer:send_after(minuteman_config:tcp_connect_threshold(),
+                                       {check_conn_connected, {ID, DstIP, DstPort}}),
+      ets:insert(connection_timer_cancel_tokens, {ID, TimerID})
   end;
 mark_replied(_, _, _) ->
   %% unsupported proto (udp, icmp, sctp...)
@@ -251,4 +266,3 @@ fmt_net(Props) ->
     _ ->
       {error, unsupported_proto}
   end.
-

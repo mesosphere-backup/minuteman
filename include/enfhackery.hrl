@@ -20,12 +20,6 @@
   new_dst_port
   }).
 
--record(backend_stats, {
-  pending_conns,
-  established_conns,
-  creation_time
-  }).
-
 -record(backend_tracking, {
   % current count of consecutive failures
   consecutive_failures = 0,
@@ -54,6 +48,7 @@
 -record(backend, {
   ip,
   port,
+  clock = fun os:system_time/0,
   tracking = #backend_tracking{},
   ewma = #ewma{}
   }).
