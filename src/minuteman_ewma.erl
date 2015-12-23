@@ -103,7 +103,7 @@ init([]) ->
   random:seed(erlang:phash2([node()]),
               erlang:monotonic_time(),
               erlang:unique_integer()),
-  ets:new(connection_ewma, [named_table]),
+  ets:new(connection_ewma, [{keypos, #backend.ip_port}, named_table]),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -153,14 +153,14 @@ handle_cast({observe, {Measurement, {IP, Port}, Success}}, State) ->
 
   NewBackend = Backend#backend{ewma = NewEwma,
                               tracking = NewTracking},
-  ets:insert(connection_ewma, {{IP, Port}, NewBackend}),
+  ets:insert(connection_ewma, NewBackend),
   {noreply, State};
 
 handle_cast({set_pending, {IP, Port}}, State) ->
   Backend = get_ewma_or_default({IP, Port}),
   NewEwma = increment_pending(Backend#backend.ewma),
   NewBackend = Backend#backend{ewma = NewEwma},
-  ets:insert(connection_ewma, {{IP, Port}, NewBackend}),
+  ets:insert(connection_ewma, NewBackend),
   {noreply, State};
 
 handle_cast(_Request, State) ->
@@ -227,11 +227,11 @@ code_change(_OldVsn, State, _Extra) ->
 observe_internal(Val, Now, Ewma = #ewma{cost = Cost,
                                stamp = Stamp,
                                decay = Decay}) ->
-  TD = max(Now - Stamp, 0),
-  W = math:exp(-TD / Decay),
+  TimeDelta = max(Now - Stamp, 0),
+  Weight = math:exp(-TimeDelta / Decay),
   NewCost = case Val > Cost of
               true -> Val;
-              false -> (Cost * W) + (Val * (1.0-W))
+              false -> (Cost * Weight) + (Val * (1.0-Weight))
             end,
   Ewma#ewma{stamp = Now, cost = NewCost}.
 
@@ -364,7 +364,7 @@ get_ewma_or_default({IP, Port}) ->
     [{_Addr, ExistingBackend}] ->
       ExistingBackend;
     _ ->
-      #backend{ip = IP, port = Port}
+      #backend{ip_port = {IP, Port}}
   end.
 
 -ifdef(TEST).
@@ -457,7 +457,7 @@ postcondition(_, _, _) -> true.
 
 pick_backend_postcondition([], {error, no_backends_available}) ->
   true;
-pick_backend_postcondition(Vips, {ok, #backend{ip = IP, port = Port}}) ->
+pick_backend_postcondition(Vips, {ok, #backend{ip_port = {IP, Port}}}) ->
   lists:member({IP, Port}, Vips);
 pick_backend_postcondition(_, _) ->
   false.

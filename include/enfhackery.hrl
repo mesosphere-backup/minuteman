@@ -46,8 +46,7 @@
   }).
 
 -record(backend, {
-  ip,
-  port,
+  ip_port,
   clock = fun os:system_time/0,
   tracking = #backend_tracking{},
   ewma = #ewma{}

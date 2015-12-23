@@ -167,7 +167,7 @@ choose_backend(IP, Port, Vips) ->
     {ok, Backends} ->
       case minuteman_ewma:pick_backend(Backends) of
         {ok, Backend} ->
-          {ok, {Backend#backend.ip, Backend#backend.port}};
+          {ok, Backend#backend.ip_port};
         {error, Reason} ->
           lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Reason]),
           error
