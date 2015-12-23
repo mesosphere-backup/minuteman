@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. Dec 2015 11:44 PM
 %%%-------------------------------------------------------------------
--module(minuteman_conn_latency_observer).
+-module(minuteman_ct_latency_observer).
 -author("Tyler Neely").
 
 -behaviour(gen_server).
@@ -228,7 +228,10 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
       ets:insert(connection_timers, {ID, os:system_time()}),
       timer:send_after(minuteman_config:tcp_connect_threshold(),
                        {check_conn_connected, {ID, DstIP, DstPort}})
-  end.
+  end;
+mark_replied(_, _, _) ->
+  %% unsupported proto (udp, icmp, sctp...)
+  ok.
 
 fmt_net(Props) ->
   {ip, IPProps} = proplists:lookup(ip, Props),
@@ -239,7 +242,13 @@ fmt_net(Props) ->
   {proto, ProtoProps} = proplists:lookup(proto, Props),
 
   {num, Proto} = proplists:lookup(num, ProtoProps),
-  {src_port, SrcPort} = proplists:lookup(src_port, ProtoProps),
-  {dst_port, DstPort} = proplists:lookup(dst_port, ProtoProps),
 
-  {Proto, SrcIP, SrcPort, DstIP, DstPort}.
+  case Proto of
+    tcp ->
+      {src_port, SrcPort} = proplists:lookup(src_port, ProtoProps),
+      {dst_port, DstPort} = proplists:lookup(dst_port, ProtoProps),
+      {Proto, SrcIP, SrcPort, DstIP, DstPort};
+    _ ->
+      {error, unsupported_proto}
+  end.
+
