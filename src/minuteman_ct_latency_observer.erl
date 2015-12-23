@@ -24,7 +24,7 @@
 
 -include_lib("gen_socket/include/gen_socket.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
--include("enfhackery.hrl").
+-include("minuteman.hrl").
 
 -define(NFQNL_COPY_PACKET, 2).
 
