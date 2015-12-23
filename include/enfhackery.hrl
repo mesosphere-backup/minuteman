@@ -50,7 +50,7 @@
 
 -record(backend, {
   ip_port,
-  clock = fun os:system_time/0,
+  clock = fun erlang:monotonic_time/0,
   tracking = #backend_tracking{},
   ewma = #ewma{}
   }).
