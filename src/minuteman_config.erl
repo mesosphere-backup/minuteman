@@ -30,10 +30,12 @@ poll_interval() ->
 
 
 tcp_connect_threshold() ->
-  application:get_env(minuteman, tcp_connect_threshold, 2000).
+  application:get_env(minuteman, tcp_connect_threshold, 400).
+
 
 tcp_consecutive_failure_threshold() ->
   application:get_env(minuteman, tcp_consecutive_failure_threshold, 5).
+
 
 tcp_failed_backend_backoff_period() ->
   application:get_env(minuteman, tcp_failed_backend_backoff_period, 30000).
