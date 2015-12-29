@@ -65,9 +65,10 @@ set_pending({IP, Port}) ->
 -spec(pick_backend(list(ip_port())) -> {ok, #backend{}} | {error, atom()}).
 pick_backend([]) ->
   {error, no_backends_available};
-%% 10 millisecond timeout for picking a backend seems reasonable
+%% 100 millisecond timeout for picking a backend seems reasonable
+%% 10 milliseconds resulted in too many false failures
 pick_backend(Backends) ->
-  gen_server:call(?SERVER, {pick_backend, Backends}, 10).
+  gen_server:call(?SERVER, {pick_backend, Backends}, 100).
 
 %%--------------------------------------------------------------------
 %% @doc
