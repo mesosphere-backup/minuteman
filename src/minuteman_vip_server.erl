@@ -43,7 +43,7 @@
 get_backend(IP, Port) ->
   get_backend({IP, Port}).
 get_backend({IP, Port}) when is_tuple(IP) andalso is_integer(Port) ->
-  gen_server:call(?SERVER, {get_backend, IP, Port}).
+  catch gen_server:call(?SERVER, {get_backend, IP, Port}, 10).
 
 push_vips(Vips) ->
   lager:debug("Pushing Vips: ~p", [Vips]),

@@ -230,7 +230,7 @@ to_mapping(Payload, LocalAddresses) ->
       {ok, Mapping};
 
     Else ->
-      lager:debug("Could not map connection"),
+      lager:warning("Could not map connection"),
       {error, {no_backend, Else}}
   end.
 

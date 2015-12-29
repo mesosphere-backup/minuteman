@@ -65,8 +65,9 @@ set_pending({IP, Port}) ->
 -spec(pick_backend(list(ip_port())) -> {ok, #backend{}} | {error, atom()}).
 pick_backend([]) ->
   {error, no_backends_available};
+%% 10 millisecond timeout for picking a backend seems reasonable
 pick_backend(Backends) ->
-  gen_server:call(?SERVER, {pick_backend, Backends}).
+  gen_server:call(?SERVER, {pick_backend, Backends}, 10).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -139,7 +140,7 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast({observe, {Measurement, {IP, Port}, Success}}, State) ->
-  lager:debug("Observing connection success: ~p with time of ~B ms", [Success, Measurement / 1.0e6]),
+  lager:debug("Observing connection success: ~p with time of ~.6f ms", [Success, Measurement / 1.0e6]),
   Backend = get_ewma_or_default({IP, Port}),
   Ewma = Backend#backend.ewma,
   Clock = Backend#backend.clock,
@@ -158,7 +159,7 @@ handle_cast({set_pending, {IP, Port}}, State) ->
   Backend = get_ewma_or_default({IP, Port}),
   NewEwma = increment_pending(Backend#backend.ewma),
   NewBackend = Backend#backend{ewma = NewEwma},
-  ets:insert(connection_ewma, NewBackend),
+  true = ets:insert(connection_ewma, NewBackend),
   {noreply, State};
 
 handle_cast(_Request, State) ->
@@ -299,12 +300,15 @@ add_success(BT = #backend_tracking{}) ->
   BT#backend_tracking{consecutive_failures = 0}.
 
 -spec(increment_pending(#ewma{}) -> #ewma{pending :: non_neg_integer()}).
-increment_pending(Ewma = #ewma{pending = Pending}) when Pending >= 0 ->
+increment_pending(Ewma = #ewma{pending = Pending}) ->
   Ewma#ewma{pending = Pending + 1}.
 
 -spec(decrement_pending(#ewma{}) -> #ewma{pending :: non_neg_integer()}).
-decrement_pending(Ewma = #ewma{pending = Pending}) when Pending >= 0 ->
-  Ewma#ewma{pending = Pending - 1}.
+decrement_pending(Ewma = #ewma{pending = Pending}) when Pending > 0 ->
+  Ewma#ewma{pending = Pending - 1};
+decrement_pending(Ewma) ->
+  lager:warning("Call to decrement connections for backend when pending connections == 0"),
+  Ewma.
 
 pick_backend_internal(BackendAddrs) ->
   %% Pull backends out of ets.
