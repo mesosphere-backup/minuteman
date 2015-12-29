@@ -45,7 +45,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {socket = erlang:error() :: gen_socket:socket()}).
+-record(state, {socket = erlang:error() :: gen_socket:socket(), vips = sets:new()}).
 
 -record(ct_timer, {
   id :: integer(),
@@ -56,7 +56,14 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-
+push_vips(Vips) ->
+  FoldFun = fun({Proto, _VipIP, _VipPort}, Backends, Acc) ->
+    BackendsList = [{Proto, BackendIP, BackendPort} || {BackendIP, BackendPort} <- Backends],
+    BackendsSet = sets:from_list(BackendsList),
+    sets:union(BackendsSet, Acc)
+  end,
+  Set = orddict:fold(FoldFun, sets:new(), Vips),
+  gen_server:cast(?SERVER, {push_vips, Set}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -87,6 +94,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  minuteman_vip_events:add_sup_handler(fun push_vips/1),
   ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   {gen_socket, RealPort, _, _, _, _} = Socket,
@@ -128,6 +136,9 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast({push_vips, FrontendsSet}, State) ->
+  State1 = State#state{vips = FrontendsSet},
+  {noreply, State1};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -159,11 +170,12 @@ handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
       ok
   end,
   {noreply, State};
-handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
+handle_info({Socket, input_ready}, State = #state{socket = Socket, vips = Vips}) ->
+  HandleFun = fun(X) -> handle_conn(Vips, X) end,
   case gen_socket:recv(Socket, 8192) of
     {ok, Data} ->
       Msg = netlink:nl_ct_dec(Data),
-      lists:foreach(fun handle_conn/1, Msg);
+      lists:foreach(HandleFun, Msg);
     Other ->
       lager:warning("Unknown msg (ct_latency): ~p", [Other])
   end,
@@ -216,12 +228,25 @@ socket(Family, Type, Protocol, Opts) ->
       gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
 
-handle_conn(#ctnetlink{msg = {_Family, _, _, Props}}) ->
+handle_conn(Vips, #ctnetlink{msg = {_Family, _, _, Props}}) ->
   {id, ID} = proplists:lookup(id, Props),
   {status, Status} = proplists:lookup(status, Props),
   {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
   Addresses = fmt_net(Reply),
-  mark_replied(ID, Addresses, Status).
+  maybe_mark_replied(Vips, ID, Addresses, Status).
+
+
+maybe_mark_replied(Vips, ID, {Proto, DstIP, DstPort, _SrcIP, _SrcPort} = Addresses, Status) ->
+  case sets:is_element({Proto, DstIP, DstPort}, Vips) of
+    true ->
+      mark_replied(ID, Addresses, Status);
+    _ ->
+      ok
+  end;
+
+maybe_mark_replied(_, _, _, _) ->
+  %% unsupported proto (udp, icmp, sctp...)
+  ok.
 
 mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
   case lists:member(seen_reply, Status) of
@@ -249,10 +274,7 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
       ets:insert(connection_timers, #ct_timer{id = ID,
                                               timer_id = TimerID,
                                               start_time = erlang:monotonic_time(nano_seconds)})
-  end;
-mark_replied(_, _, _) ->
-  %% unsupported proto (udp, icmp, sctp...)
-  ok.
+  end.
 
 fmt_net(Props) ->
   {ip, IPProps} = proplists:lookup(ip, Props),
