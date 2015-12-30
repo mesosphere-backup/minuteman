@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, push_vips/1]).
+-export([start_link/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -29,9 +29,7 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-push_vips(Vips) ->
-  gen_server:call(?SERVER, {push_vips, Vips}),
-  ok.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -62,6 +60,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  minuteman_vip_events:add_sup_handler(fun(Vips) -> gen_server:call(?SERVER, {push_vips, Vips}) end),
   %% Clear the VIP state
   handle_push_vips([]),
   {ok, #state{}}.

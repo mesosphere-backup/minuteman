@@ -32,6 +32,7 @@ maybe_add_network_child(Children) ->
     end.
 add_default_children(Children) ->
     [
+        ?CHILD(minuteman_vip_events, worker),
         ?CHILD(minuteman_ipsets, worker),
         ?CHILD(minuteman_vip_server, worker),
         ?CHILD(minuteman_mesos_poller, worker)|

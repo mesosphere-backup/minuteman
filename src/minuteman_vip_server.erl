@@ -84,6 +84,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  minuteman_vip_events:add_sup_handler(fun push_vips/1),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
