@@ -103,7 +103,7 @@ init([]) ->
   random:seed(erlang:phash2([node()]),
               erlang:monotonic_time(),
               erlang:unique_integer()),
-  ets:new(connection_ewma, [{keypos, #backend.ip_port}, named_table]),
+  connection_ewma = ets:new(connection_ewma, [{keypos, #backend.ip_port}, named_table]),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -153,7 +153,7 @@ handle_cast({observe, {Measurement, {IP, Port}, Success}}, State) ->
 
   NewBackend = Backend#backend{ewma = NewEwma,
                               tracking = NewTracking},
-  ets:insert(connection_ewma, NewBackend),
+  true = ets:insert(connection_ewma, NewBackend),
   {noreply, State};
 
 handle_cast({set_pending, {IP, Port}}, State) ->
@@ -364,9 +364,9 @@ try_different_rand(Max, Other, TriesLeft) ->
 
 get_ewma_or_default({IP, Port}) ->
   case ets:lookup(connection_ewma, {IP, Port}) of
-    [{_Addr, ExistingBackend}] ->
+    [ExistingBackend] ->
       ExistingBackend;
-    _ ->
+    [] ->
       #backend{ip_port = {IP, Port}}
   end.
 
@@ -375,7 +375,8 @@ get_ewma_or_default({IP, Port}) ->
 -record(test_state, {known_vips = sets:new()}).
 
 stop() ->
-  gen_server:call(?MODULE, clear).
+  gen_server:call(?MODULE, clear),
+  gen_server:stop(?MODULE).
 
 proper_test() ->
   [] = proper:module(?MODULE).
@@ -509,4 +510,14 @@ command(S) ->
          {call, ?MODULE, set_pending, [ip_port()]}] ++
         [{call, ?MODULE, pick_backend, [list(oneof(Vips))]} || VipsPresent]).
 
+state_test() ->
+  TestTuple = {{1, 2, 3, 4}, 5000},
+  {ok, State} = init([]),
+  ?assertEqual([], ets:lookup(connection_ewma, TestTuple)),
+  {noreply, State} = handle_cast({set_pending, TestTuple}, State),
+  ?assertNotEqual([], ets:lookup(connection_ewma, TestTuple)),
+  Backend = get_ewma_or_default(TestTuple),
+  EWMA = Backend#backend.ewma,
+  ?assertEqual(1, EWMA#ewma.pending),
+  ets:delete(connection_ewma).
 -endif.
