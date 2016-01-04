@@ -7,6 +7,7 @@
 %%
 %% -------------------------------------------------------------------
 main(Args) ->
+    os:putenv("ERL_EPMD_PORT", "61420"),
     ok = start_epmd(),
     %% Extract the args
     {RestArgs, TargetNode} = process_args(Args, [], undefined),
