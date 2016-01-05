@@ -24,3 +24,5 @@
 +c true
 
 +stbt nnts
+
+-epmd_port 61420

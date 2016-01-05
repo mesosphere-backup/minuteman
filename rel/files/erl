@@ -1,5 +1,7 @@
 #!/bin/sh
 
+export ERL_EPMD_PORT=61420
+
 # /bin/sh on Solaris is not a POSIX compatible shell, but /usr/bin/ksh is.
 if [ `uname -s` = 'SunOS' -a "${POSIX_SHELL}" != "true" ]; then
     POSIX_SHELL="true"
