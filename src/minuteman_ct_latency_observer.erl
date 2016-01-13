@@ -94,6 +94,10 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  lists:foreach(fun (M) ->
+                    exometer:new([M], counter)
+                end, [observed_conns, timeouts, successes]),
+  exometer:new([connect_latency], histogram),
   minuteman_vip_events:add_sup_handler(fun push_vips/1),
   ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
@@ -162,6 +166,7 @@ handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
       TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
       timer:cancel(TimerID),
       Success = false,
+      exometer:update([timeouts], 1),
       minuteman_ewma:observe(TimeDelta,
                              {IP, Port},
                              Success);
@@ -257,6 +262,8 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
           TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
           timer:cancel(TimerID),
           Success = true,
+          exometer:update([successes], 1),
+          exometer:update([connect_latency], TimeDelta),
           minuteman_ewma:observe(TimeDelta,
                                  {DstIP, DstPort},
                                  Success);
@@ -265,6 +272,7 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
           ok
       end;
     false ->
+      exometer:update([observed_conns], 1),
       minuteman_ewma:set_pending({DstIP, DstPort}),
       lager:debug("marking backend ~p:~p in-flight", [DstIP, DstPort]),
       % Set up a timer and schedule a connection check at the
