@@ -43,17 +43,17 @@ metrics_for_path("/vip/" ++ Vip) ->
         {ok, Backends} ->
           vip_metrics({IP, Port}, Backends);
         error ->
-          [{error, no_backends}]
+          #{error => no_backends}
       end;
     _ ->
-      [{error, invalid_vip}]
+      #{error => invalid_vip}
   end;
 metrics_for_path("/backend/" ++ Backend) ->
   case parse_ip_port(Backend) of
     {IP, Port} ->
       metrics_for_backend({IP, Port});
     _ ->
-      [{error, invalid_backend}]
+      #{error => invalid_backend}
   end.
 
 parse_ip_port(IpPort) ->
