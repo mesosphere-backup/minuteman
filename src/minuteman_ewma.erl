@@ -15,7 +15,10 @@
 -export([start_link/0,
   observe/3,
   set_pending/1,
-  pick_backend/1
+  pick_backend/1,
+  get_ewma/1,
+  is_open/1,
+  cost/1
   ]).
 
 %% gen_server callbacks
@@ -69,6 +72,13 @@ pick_backend([]) ->
 %% 10 milliseconds resulted in too many false failures
 pick_backend(Backends) ->
   gen_server:call(?SERVER, {pick_backend, Backends}, 100).
+
+
+%%--------------------------------------------------------------------
+%% @doc
+%%--------------------------------------------------------------------
+get_ewma({IP, Port}) ->
+  gen_server:call(?SERVER, {get_ewma, {IP, Port}}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -126,6 +136,8 @@ handle_call({pick_backend, Backends}, _From, State) ->
 handle_call(clear, _From, State) ->
   ets:delete_all_objects(connection_ewma),
   {reply, ok, State};
+handle_call({get_ewma, {IP, Port}}, _From, State) ->
+  {reply, get_ewma_or_default({IP, Port}), State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -269,36 +281,23 @@ is_open(#backend_tracking{last_failure_time = Last,
   Now = erlang:monotonic_time(nano_seconds),
   (Now - Last) > Backoff.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Records a failure, to be counted against the max_failure_threshold.
-%% @end
-%%--------------------------------------------------------------------
--spec(track_success(boolean(), #backend_tracking{}) -> #backend_tracking{}).
-track_success(true, Tracking) ->
-  add_success(Tracking);
-track_success(false, Tracking) ->
-  add_failure(Tracking).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Records a failure, to be counted against the max_failure_threshold.
+%% Records failure and success statistics for a backend.
 %% @end
 %%--------------------------------------------------------------------
--spec(add_failure(BT :: #backend_tracking{}) -> #backend_tracking{}).
-add_failure(BT = #backend_tracking{consecutive_failures = Failures}) ->
+-spec(track_success(boolean(), BT :: #backend_tracking{}) -> #backend_tracking{}).
+track_success(true, BT = #backend_tracking{total_successes = TotalSuccesses}) ->
+  BT#backend_tracking{total_successes = TotalSuccesses + 1,
+                      consecutive_failures = 0};
+track_success(false, BT = #backend_tracking{total_failures = TotalFailures,
+                                            consecutive_failures = ConsecutiveFailures}) ->
   Now = erlang:monotonic_time(nano_seconds),
-  BT#backend_tracking{consecutive_failures = Failures + 1,
+  BT#backend_tracking{total_failures = TotalFailures + 1,
+                      consecutive_failures = ConsecutiveFailures + 1,
                       last_failure_time = Now}.
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Records a success, resetting consecutive_failures to 0.
-%% @end
-%%--------------------------------------------------------------------
--spec(add_success(BT :: #backend_tracking{}) -> #backend_tracking{}).
-add_success(BT = #backend_tracking{}) ->
-  BT#backend_tracking{consecutive_failures = 0}.
 
 -spec(increment_pending(#ewma{}) -> #ewma{pending :: non_neg_integer()}).
 increment_pending(Ewma = #ewma{pending = Pending}) ->

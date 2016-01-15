@@ -13,7 +13,7 @@
 -behaviour(gen_server).
 
 %% API
--export([stop/0, start_link/0, push_vips/1, get_backend/1, get_backend/2]).
+-export([stop/0, start_link/0, push_vips/1, get_backend/1, get_backend/2, get_vips/0, get_backends_for_vip/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -50,6 +50,12 @@ push_vips(Vips) ->
   VipDict = dict:from_list(Vips),
   gen_server:cast(?SERVER, {push_vips, VipDict}),
   ok.
+
+get_vips() ->
+  gen_server:call(?SERVER, get_vips).
+
+get_backends_for_vip(Ip, Port) ->
+  gen_server:call(?SERVER, {get_backends_for_vip, {Ip, Port}}).
 
 stop() ->
   gen_server:call(?MODULE, stop).
@@ -105,6 +111,11 @@ init([]) ->
 handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips}) ->
   lager:debug("Looking up VIP: ~p:~B", [IP, Port]),
   {reply, choose_backend(IP, Port, Vips), State};
+handle_call(get_vips, _From, State = #state{vips = Vips}) ->
+  {reply, Vips, State};
+handle_call({get_backends_for_vip, {Ip, Port}}, _From, State = #state{vips = Vips}) ->
+  Backends = backends_for_vip(Ip, Port, Vips),
+  {reply, Backends, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -160,10 +171,7 @@ terminate(_Reason, _State) ->
 -spec(choose_backend(inet:ip4_address(), inet:port_number(), vips()) -> term()).
 choose_backend(IP, Port, Vips) ->
   %% We assume, and only support tcp right now
-  case dict:find({tcp, IP, Port}, Vips) of
-    {ok, []} ->
-      %% This should never happen, but it's better than crashing
-      error;
+  case backends_for_vip(IP, Port, Vips) of
     {ok, Backends} ->
       case minuteman_ewma:pick_backend(Backends) of
         {ok, Backend} ->
@@ -172,6 +180,18 @@ choose_backend(IP, Port, Vips) ->
           lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Reason]),
           error
       end;
+    error ->
+      error
+  end.
+
+-spec(backends_for_vip(inet:ip4_address(), inet:port_number(), vips()) -> term()).
+backends_for_vip(IP, Port, Vips) ->
+  case dict:find({tcp, IP, Port}, Vips) of
+    {ok, []} ->
+      %% This should never happen, but it's better than crashing
+      error;
+    {ok, Backends} ->
+      {ok, Backends};
     error ->
       error
   end.

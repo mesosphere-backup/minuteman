@@ -11,7 +11,9 @@
                   inets,
                   pkt,
                   jsx,
-                  gen_socket
+                  gen_socket,
+                  mochiweb,
+                  webmachine
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}

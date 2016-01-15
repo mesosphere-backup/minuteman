@@ -31,7 +31,11 @@ maybe_add_network_child(Children) ->
             Children
     end.
 add_default_children(Children) ->
+    Webmachine = {webmachine_mochiweb,
+           {webmachine_mochiweb, start, [minuteman_api_config:web_config()]},
+           permanent, 5000, worker, [mochiweb_socket_server]},
     [
+        Webmachine,
         ?CHILD(minuteman_vip_events, worker),
         ?CHILD(minuteman_ipsets, worker),
         ?CHILD(minuteman_vip_server, worker),

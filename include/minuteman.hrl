@@ -21,6 +21,10 @@
   }).
 
 -record(backend_tracking, {
+  % total success and failure counters
+  total_successes = 0,
+  total_failures = 0,
+
   % current count of consecutive failures
   consecutive_failures = 0,
 
