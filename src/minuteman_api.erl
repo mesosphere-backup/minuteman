@@ -31,7 +31,7 @@ to_json(RD, Ctx) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% This is the top-level view of stats for a node.  
+%% This is the top-level view of stats for a node.
 %% @end
 %%--------------------------------------------------------------------
 metrics_for_path("/vips" ++ _Rest) ->
@@ -41,7 +41,7 @@ metrics_for_path("/vip/" ++ Vip) ->
     {IP, Port} ->
       case minuteman_vip_server:get_backends_for_vip(IP, Port) of
         {ok, Backends} ->
-          vip_metrics({IP, Port}, Backends);
+          metrics_for_backends(Backends);
         error ->
           #{error => no_backends}
       end;
@@ -59,19 +59,14 @@ metrics_for_path("/backend/" ++ Backend) ->
 parse_ip_port(IpPort) ->
   case string:tokens(IpPort, ":") of
     [IPString, Port] ->
-      case is_int(Port) of
-        true ->
-          case inet:parse_ipv4_address(IPString) of
-            {ok, ParsedIP} ->
+      case {is_int(Port), inet:parse_ipv4_address(IPString)} of
+        {true, {ok, ParsedIP}} ->
               {ParsedIP, list_to_integer(Port)};
-            _ ->
-              error
-          end;
-        false ->
+        _ ->
           error
       end;
-		_ ->
-			error
+    _ ->
+      error
   end.
 
 
@@ -81,16 +76,11 @@ vip_metrics() ->
   % get stats for each
   LiveVips = minuteman_vip_server:get_vips(),
   LiveVipMetrics = dict:fold(fun (Vip, Backends, AccIn) ->
-                                 maps:put(fmt_ip_port(Vip), vip_metrics(Vip, Backends), AccIn)
+                                 maps:put(fmt_ip_port(Vip), metrics_for_backends(Backends), AccIn)
                              end, #{}, LiveVips),
 
   #{vips => LiveVipMetrics}.
 
-vip_metrics({_Proto, IP, Port}, Backends) ->
-  vip_metrics({IP, Port}, Backends);
-vip_metrics({IP, Port}, Backends) ->
-  Metrics = metrics_for_backends(Backends),
-  #{backends => Metrics}.
 
 metrics_for_backends(Backends) ->
   lists:foldl(fun (Backend, AccIn) ->
@@ -118,6 +108,6 @@ fmt_ip_port({{A, B, C, D}, Port}) ->
 is_int(S) ->
   case re:run(S, "\\d+") of
     nomatch -> false;
-    A ->
+    _ ->
       true
   end.

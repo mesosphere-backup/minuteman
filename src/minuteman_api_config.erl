@@ -21,7 +21,7 @@ dispatch() ->
     ]).
 
 web_config() ->
-    {ok, App} = application:get_application(?MODULE),
+    {ok, _App} = application:get_application(?MODULE),
     [
         {ip, minuteman_config:api_listen_ip()},
         {port, minuteman_config:api_listen_port()},
