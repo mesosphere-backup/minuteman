@@ -12,6 +12,7 @@
 
 -behaviour(gen_server).
 
+-compile(export_all).
 %% API
 -export([start_link/0]).
 
@@ -221,41 +222,52 @@ get_agent_ips(Agents) ->
 framework_fold(_AgentIPs, [], AccIn) ->
   AccIn;
 framework_fold(AgentIPs, [#{tasks := Tasks}|RestFrameworks], AccIn) ->
-  AccIn2 = task_fold(AgentIPs, Tasks, AccIn),
+
+  FoldFun = task_fold_fun(AgentIPs),
+  AccIn2 = lists:foldl(FoldFun, AccIn, Tasks),
   framework_fold(AgentIPs, RestFrameworks, AccIn2);
 framework_fold(AgentIPs, [_|RestFrameworks], AccIn) ->
   framework_fold(AgentIPs, RestFrameworks, AccIn).
 
+%% Wrapper fun to make task_fold into a higher order function
+%% It's a separate function to avoid capturing excessive
+%% local variables
+task_fold_fun(AgentIPs) ->
+  fun (Task, Acc) ->
+    try task_fold(AgentIPs, Task, Acc) of
+      Acc2 -> Acc2
+    catch Error:Exception ->
+      lager:warning("Got error ~p:~p, while parsing task: ~p", [Error, Exception, Task]),
+      Acc
+    end
+  end.
 -spec task_fold(AgentIPs :: orddict:orddict(), [task()], orddict:orddict()) -> orddict:orddict().
-task_fold(_AgentIPs, [], AccIn) ->
+task_fold(_AgentIPs, _Task = #{statuses := []}, AccIn) ->
   AccIn;
-task_fold(AgentIPs, [_Task = #{statuses := []}|RestTasks], AccIn) ->
-  task_fold(AgentIPs, RestTasks, AccIn);
-task_fold(AgentIPs, [_Task = #{
+task_fold(AgentIPs, _Task = #{
             container := #{docker := #{network := <<"BRIDGE">>}},
             slave_id := SlaveID,
             labels := Labels,
             resources  := #{ports := Ports},
             statuses := Statuses,
-            state := <<"TASK_RUNNING">>}|RestTasks], AccIn) ->
+            state := <<"TASK_RUNNING">>}, AccIn) ->
   %% we only care about the most recent status, which will be the last in the list
   [Status|_] = lists:reverse(Statuses),
   IPs = orddict:fetch(SlaveID, AgentIPs),
-  AccIn2 = vip_permutations(IPs, Status, Ports, Labels, AccIn),
-  task_fold(AgentIPs, RestTasks, AccIn2);
+  vip_permutations(IPs, Status, Ports, Labels, AccIn);
 
-task_fold(AgentIPs, [_Task = #{
+task_fold(_AgentIPs, _Task = #{
             labels := Labels,
             resources  := #{ports := Ports},
             statuses := Statuses,
-            state := <<"TASK_RUNNING">>}|RestTasks], AccIn) ->
+            state := <<"TASK_RUNNING">>}, AccIn) ->
   %% we only care about the most recent status, which will be the last in the list
   [Status|_] = lists:reverse(Statuses),
   IPs = status_to_ips(Status),
-  AccIn2 = vip_permutations(IPs, Status, Ports, Labels, AccIn),
-  task_fold(AgentIPs, RestTasks, AccIn2);
-task_fold(AgentIPs, [_|RestTasks], AccIn) ->
-  task_fold(AgentIPs, RestTasks, AccIn).
+  vip_permutations(IPs, Status, Ports, Labels, AccIn);
+
+task_fold(_AgentIPs, _Task, AccIn) ->
+  AccIn.
 
 -spec vip_permutations([inet:ip4_address()], task_status(), [binary()], [binary()], orddict:orddict())
     -> orddict:orddict().
@@ -563,5 +575,117 @@ docker_basic_test() ->
     }
   ],
   ?assertEqual(Expected, Vips).
+bad_state_test() ->
+  {ok, Data} = file:read_file("testdata/bad-state-gaal.json"),
+  Vips = parse_json_to_vips(Data),
+  Expected = [
+    {
+      {tcp, {10, 22, 126, 49}, 5000},
+      [
+        {{10, 22, 126, 51}, 25219},
+        {{10, 22, 126, 51}, 10445},
+        {{10, 22, 126, 51}, 13057},
+        {{10, 22, 126, 51}, 19012},
+        {{10, 22, 126, 51}, 4892},
+        {{10, 22, 126, 51}, 25053},
+        {{10, 22, 126, 51}, 5360},
+        {{10, 22, 126, 51}, 15854},
+        {{10, 22, 126, 51}, 9378},
+        {{10, 22, 126, 51}, 8368},
+        {{10, 22, 126, 51}, 24066},
+        {{10, 22, 126, 51}, 17532},
+        {{10, 22, 126, 51}, 28788},
+        {{10, 22, 126, 51}, 19977},
+        {{10, 22, 126, 51}, 9306},
+        {{10, 22, 126, 51}, 7956},
+        {{10, 22, 126, 51}, 24748},
+        {{10, 22, 126, 51}, 16554},
+        {{10, 22, 126, 51}, 12645},
+        {{10, 22, 126, 51}, 13678},
+        {{10, 22, 126, 51}, 11472},
+        {{10, 22, 126, 51}, 11759},
+        {{10, 22, 126, 51}, 12362},
+        {{10, 22, 126, 51}, 20537},
+        {{10, 22, 126, 51}, 12354},
+        {{10, 22, 126, 51}, 11285},
+        {{10, 22, 126, 51}, 5955},
+        {{10, 22, 126, 51}, 28006},
+        {{10, 22, 126, 51}, 28736},
+        {{10, 22, 126, 51}, 23543},
+        {{10, 22, 126, 51}, 15816},
+        {{10, 22, 126, 51}, 1247},
+        {{10, 22, 126, 51}, 9794},
+        {{10, 22, 126, 51}, 18722},
+        {{10, 22, 126, 51}, 12901},
+        {{10, 22, 126, 51}, 9294},
+        {{10, 22, 126, 51}, 2662},
+        {{10, 22, 126, 51}, 16934},
+        {{10, 22, 126, 51}, 21517},
+        {{10, 22, 126, 51}, 15554},
+        {{10, 22, 126, 51}, 25680},
+        {{10, 22, 126, 51}, 27868},
+        {{10, 22, 126, 51}, 9715},
+        {{10, 22, 126, 51}, 23507},
+        {{10, 22, 126, 51}, 23410},
+        {{10, 22, 126, 51}, 29167},
+        {{10, 22, 126, 51}, 2054},
+        {{10, 22, 126, 51}, 1269},
+        {{10, 22, 126, 51}, 24388},
+        {{10, 22, 126, 51}, 18044},
+        {{10, 22, 126, 51}, 9491},
+        {{10, 22, 126, 51}, 19619},
+        {{10, 22, 126, 51}, 3181},
+        {{10, 22, 126, 51}, 22575},
+        {{10, 22, 126, 51}, 3317},
+        {{10, 22, 126, 51}, 8190},
+        {{10, 22, 126, 51}, 24829},
+        {{10, 22, 126, 51}, 11183},
+        {{10, 22, 126, 51}, 28082},
+        {{10, 22, 126, 51}, 20833},
+        {{10, 22, 126, 51}, 4572},
+        {{10, 22, 126, 51}, 9851},
+        {{10, 22, 126, 51}, 8188},
+        {{10, 22, 126, 51}, 25561},
+        {{10, 22, 126, 51}, 11098},
+        {{10, 22, 126, 51}, 12588},
+        {{10, 22, 126, 51}, 13645},
+        {{10, 22, 126, 51}, 10556},
+        {{10, 22, 126, 51}, 21495},
+        {{10, 22, 126, 51}, 14726},
+        {{10, 22, 126, 51}, 25270},
+        {{10, 22, 126, 51}, 3364},
+        {{10, 22, 126, 51}, 21981},
+        {{10, 22, 126, 51}, 3996},
+        {{10, 22, 126, 51}, 21012},
+        {{10, 22, 126, 51}, 22553},
+        {{10, 22, 126, 51}, 19930},
+        {{10, 22, 126, 51}, 16739},
+        {{10, 22, 126, 51}, 25885},
+        {{10, 22, 126, 51}, 26723},
+        {{10, 22, 126, 51}, 17187},
+        {{10, 22, 126, 51}, 14599},
+        {{10, 22, 126, 51}, 30892},
+        {{10, 22, 126, 51}, 19472},
+        {{10, 22, 126, 51}, 13700},
+        {{10, 22, 126, 51}, 25624},
+        {{10, 22, 126, 51}, 15374},
+        {{10, 22, 126, 51}, 22461},
+        {{10, 22, 126, 51}, 29022},
+        {{10, 22, 126, 51}, 25929},
+        {{10, 22, 126, 51}, 24392},
+        {{10, 22, 126, 51}, 27132},
+        {{10, 22, 126, 51}, 25297},
+        {{10, 22, 126, 51}, 23916},
+        {{10, 22, 126, 51}, 16385},
+        {{10, 22, 126, 51}, 3653},
+        {{10, 22, 126, 51}, 12167},
+        {{10, 22, 126, 51}, 6679},
+        {{10, 22, 126, 51}, 10547},
+        {{10, 22, 126, 51}, 29747}
+      ]
+    }
+  ],
+  ?assertEqual(Expected, Vips).
+
 
 -endif.
