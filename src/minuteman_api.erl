@@ -91,12 +91,19 @@ metrics_for_backend({IP, Port}) ->
   Backend = #backend{tracking = Tracking} = minuteman_ewma:get_ewma({IP, Port}),
   Cost = minuteman_ewma:cost(Backend),
   Healthy = minuteman_ewma:is_open(Tracking),
+  LatencyMetrics = case exometer:get_value([connect_latency, backend, {IP, Port}]) of
+                     {ok, LM} ->
+                       maps:from_list(LM);
+                     _ ->
+                       #{}
+                   end,
 
   #{
     ewma_cost => Cost,
     total_failures => Tracking#backend_tracking.total_failures,
     total_sucesses => Tracking#backend_tracking.total_successes,
-    is_healthy => Healthy
+    is_healthy => Healthy,
+    latency_last_60s => LatencyMetrics
    }.
 
 fmt_ip_port({_Proto, IP, Port}) ->
