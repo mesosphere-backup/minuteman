@@ -29,7 +29,7 @@ content_types_provided(RD, Ctx) ->
    ], RD, Ctx}.
 
 to_json(RD, Ctx) ->
-  Metrics = metrics_for_path(wrq:path(RD)),
+  Metrics = metrics_for_path(wrq:path(RD), wrq:path_info(RD)),
   {jsx:encode(Metrics), RD, Ctx}.
 
 %%--------------------------------------------------------------------
@@ -37,9 +37,11 @@ to_json(RD, Ctx) ->
 %% This is the top-level view of stats for a node.
 %% @end
 %%--------------------------------------------------------------------
-metrics_for_path("/vips" ++ _Rest) ->
+metrics_for_path("/vips", _) ->
   vip_metrics();
-metrics_for_path("/vip/" ++ Vip) ->
+metrics_for_path("/vips/", _) ->
+  vip_metrics();
+metrics_for_path(_, [{vip, Vip}]) ->
   case parse_ip_port(Vip) of
     {IP, Port} ->
       case minuteman_vip_server:get_backends_for_vip(IP, Port) of
@@ -51,7 +53,7 @@ metrics_for_path("/vip/" ++ Vip) ->
     _ ->
       #{error => invalid_vip}
   end;
-metrics_for_path("/backend/" ++ Backend) ->
+metrics_for_path(_, [{backend, Backend}]) ->
   case parse_ip_port(Backend) of
     {IP, Port} ->
       metrics_for_backend({IP, Port});
