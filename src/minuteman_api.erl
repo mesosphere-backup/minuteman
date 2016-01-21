@@ -23,7 +23,10 @@ allowed_methods(RD, Ctx) ->
   {['GET'], RD, Ctx}.
 
 content_types_provided(RD, Ctx) ->
-  {[{"application/json", to_json}], RD, Ctx}.
+  {[
+    {"application/json", to_json}
+    %% TODO text/plain and text/html
+   ], RD, Ctx}.
 
 to_json(RD, Ctx) ->
   Metrics = metrics_for_path(wrq:path(RD)),
@@ -59,9 +62,9 @@ metrics_for_path("/backend/" ++ Backend) ->
 parse_ip_port(IpPort) ->
   case string:tokens(IpPort, ":") of
     [IPString, Port] ->
-      case {is_int(Port), inet:parse_ipv4_address(IPString)} of
-        {true, {ok, ParsedIP}} ->
-              {ParsedIP, list_to_integer(Port)};
+      case {string:to_integer(Port), inet:parse_ipv4_address(IPString)} of
+        {{ParsedPort, []}, {ok, ParsedIP}} ->
+              {ParsedIP, ParsedPort};
         _ ->
           error
       end;
@@ -76,7 +79,9 @@ vip_metrics() ->
   % get stats for each
   LiveVips = minuteman_vip_server:get_vips(),
   LiveVipMetrics = dict:fold(fun (Vip, Backends, AccIn) ->
-                                 maps:put(fmt_ip_port(Vip), metrics_for_backends(Backends), AccIn)
+                                 VIPIPPort = fmt_ip_port(Vip),
+                                 Metrics = metrics_for_backends(Backends),
+                                 AccIn#{VIPIPPort => Metrics}
                              end, #{}, LiveVips),
 
   #{vips => LiveVipMetrics}.
@@ -84,7 +89,9 @@ vip_metrics() ->
 
 metrics_for_backends(Backends) ->
   lists:foldl(fun (Backend, AccIn) ->
-                  maps:put(fmt_ip_port(Backend), metrics_for_backend(Backend), AccIn)
+                  BackendIPPort = fmt_ip_port(Backend),
+                  Metrics = metrics_for_backend(Backend),
+                  AccIn#{BackendIPPort => Metrics}
               end, #{}, Backends).
 
 metrics_for_backend({IP, Port}) ->
@@ -108,13 +115,7 @@ metrics_for_backend({IP, Port}) ->
 
 fmt_ip_port({_Proto, IP, Port}) ->
   fmt_ip_port({IP, Port});
-fmt_ip_port({{A, B, C, D}, Port}) ->
-  List = io_lib:format("~p.~p.~p.~p:~p", [A, B, C, D, Port]),
+fmt_ip_port({IP, Port}) ->
+  IPString = inet_parse:ntoa(IP),
+  List = io_lib:format("~s:~p", [IPString, Port]),
   list_to_binary(List).
-
-is_int(S) ->
-  case re:run(S, "\\d+") of
-    nomatch -> false;
-    _ ->
-      true
-  end.

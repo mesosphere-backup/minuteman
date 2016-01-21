@@ -31,9 +31,23 @@ maybe_add_network_child(Children) ->
             Children
     end.
 add_default_children(Children) ->
+    {ok, _App} = application:get_application(?MODULE),
+
+    Dispatch = lists:flatten([
+                              {['*'], minuteman_api, []}
+                             ]),
+
+    ApiConfig = [
+        {ip, minuteman_config:api_listen_ip()},
+        {port, minuteman_config:api_listen_port()},
+        {log_dir, "priv/log"},
+        {dispatch, Dispatch}
+    ],
+
     Webmachine = {webmachine_mochiweb,
-           {webmachine_mochiweb, start, [minuteman_api_config:web_config()]},
+           {webmachine_mochiweb, start, [ApiConfig]},
            permanent, 5000, worker, [mochiweb_socket_server]},
+
     [
         Webmachine,
         ?CHILD(minuteman_vip_events, worker),
@@ -42,6 +56,7 @@ add_default_children(Children) ->
         ?CHILD(minuteman_mesos_poller, worker)|
         Children
     ].
+
 get_children() ->
     Children1 = maybe_add_network_child([]),
     Children2 = add_default_children(Children1),

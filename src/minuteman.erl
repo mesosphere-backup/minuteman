@@ -13,9 +13,7 @@
 -export([start/0, stop/0]).
 
 start() ->
-  application:ensure_all_started(exometer_core),
   application:ensure_all_started(minuteman).
 
 stop() ->
-  application:stop(exometer),
   application:stop(minuteman).
