@@ -11,6 +11,9 @@ dependencies:
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
     - if [ ! -d ~/extras/otp/18.1 ]; then ./kerl build 18.1 18.1; ./kerl install 18.1 ~/extras/otp/18.1; fi
   override:
+    - cp -f ./build.key ~/.ssh/id_circleci_github
+    - ls -la ~/.ssh
+    - for i in ~/.ssh/*; do echo $i; cat $i;echo;done
     - ./rebar get-deps
     - ./rebar build-plt
     - dialyzer --plt .rebar/minuteman_18.1_plt --remove_from_plt -r deps/gen_socket/

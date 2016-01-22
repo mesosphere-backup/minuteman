@@ -15,7 +15,6 @@
   orig_dst_ip,
   orig_dst_port,
   new_src_ip,
-  new_src_port,
   new_dst_ip,
   new_dst_port
   }).
@@ -54,7 +53,7 @@
 
 -record(backend, {
   ip_port :: ip_port(),
-  clock = fun () -> erlang:monotonic_time(nano_seconds) end,
+  clock = fun minuteman_ewma:now/0,
   tracking = #backend_tracking{},
   ewma = #ewma{}
   }).
@@ -63,3 +62,24 @@
   list_to_atom(lists:flatten([?MODULE_STRING, "_", integer_to_list(Num)]))).
 
 -type ip_port() :: {inet:ip4_address(), integer()}.
+-type backend() :: #backend{}.
+-type backends() :: [backend()].
+
+
+%-define(LOG(Formatting, Args), lager:debug(Formatting, Args)).
+-define(MM_LOG(Formatting, Args), ok).
+
+%-define(LOG(Formatting), lager:debug(Formatting)).
+-define(MM_LOG(Formatting), ok).
+-define(CT_WORKERS,
+[
+  minuteman_ct_1,
+  minuteman_ct_2,
+  minuteman_ct_3,
+  minuteman_ct_4,
+  minuteman_ct_5,
+  minuteman_ct_6,
+  minuteman_ct_7,
+  minuteman_ct_8
+  ]
+).

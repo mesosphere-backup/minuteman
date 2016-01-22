@@ -43,12 +43,27 @@
 get_backend(IP, Port) ->
   get_backend({IP, Port}).
 get_backend({IP, Port}) when is_tuple(IP) andalso is_integer(Port) ->
-  catch gen_server:call(?SERVER, {get_backend, IP, Port}, 10).
+  %% We assume, and only support tcp right now
+  case catch ets:lookup(vips, {tcp, IP, Port}) of
+    [] ->
+      %% This should never happen, but it's better than crashing
+      error;
+    [{_Key, Backends}] when is_list(Backends) ->
+      case minuteman_ewma:pick_backend(Backends) of
+        {ok, Backend} ->
+          {ok, Backend#backend.ip_port};
+        {error, Reason} ->
+          lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Reason]),
+          error
+      end;
+    Error ->
+      lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Error]),
+      error
+  end.
 
 push_vips(Vips) ->
   lager:debug("Pushing Vips: ~p", [Vips]),
-  VipDict = dict:from_list(Vips),
-  gen_server:cast(?SERVER, {push_vips, VipDict}),
+  gen_server:cast(?SERVER, {push_vips, Vips}),
   ok.
 
 get_vips() ->
@@ -90,6 +105,10 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  ets:new(vips, [named_table, set, {read_concurrency, true}]),
+  %% 16MB,
+  process_flag(min_heap_size, 2000000),
+  process_flag(priority, low),
   minuteman_vip_events:add_sup_handler(fun push_vips/1),
   {ok, #state{}}.
 
@@ -109,7 +128,6 @@ init([]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips}) ->
-  lager:debug("Looking up VIP: ~p:~B", [IP, Port]),
   {reply, choose_backend(IP, Port, Vips), State};
 handle_call(get_vips, _From, State = #state{vips = Vips}) ->
   {reply, Vips, State};
@@ -131,6 +149,11 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast({push_vips, Vips}, State) ->
+  CurrentVIPs = ets:foldl(fun({Key, _Value}, Acc) -> [Key|Acc] end, [], vips),
+  Keys = [Key || {Key, _Value} <- Vips],
+  VipsToDelete = Keys -- CurrentVIPs,
+  [ets:delete(vips, Key) || Key <- VipsToDelete],
+  [ets:insert(vips, Vip) || Vip <- Vips],
   {noreply, State#state{vips = Vips}};
 handle_cast(_Request, State) ->
   {noreply, State}.
@@ -228,7 +251,7 @@ prop_server_works_fine() ->
                     minuteman_vip_events:start_link(),
                     ?MODULE:start_link(),
                     {History, State, Result} = run_commands(?MODULE, Cmds),
-                    ?MODULE:stop(),
+                    gen_server:stop(?MODULE),
                     gen_server:stop(minuteman_vip_events),
                     ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
                                         [History, State, Result]),

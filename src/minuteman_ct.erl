@@ -12,7 +12,7 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, handle_mapping/2]).
+-export([start_link/1, install_mapping/1]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -43,18 +43,26 @@
 %%% API
 %%%===================================================================
 
-handle_mapping(Num, Mapping) ->
-  gen_server:call(?SERVER_NAME_WITH_NUM(Num), {handle_mapping, Mapping}).
+install_mapping(Mapping) ->
+  HashSrc =
+    [
+      Mapping#mapping.orig_src_ip,
+      Mapping#mapping.orig_src_port
+    ],
+  Hash = erlang:phash2(HashSrc),
+  Idx = Hash rem length(?CT_WORKERS) + 1,
+  WorkerID = lists:nth(Idx, ?CT_WORKERS),
+  gen_server:call(WorkerID, {handle_mapping, Mapping}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link(Num :: non_neg_integer()) ->
+-spec(start_link(Id :: atom()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(Num) ->
-  gen_server:start_link({local, ?SERVER_NAME_WITH_NUM(Num)}, ?MODULE, [], []).
+start_link(Id) ->
+  gen_server:start_link({local, Id}, ?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -75,6 +83,8 @@ start_link(Num) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  process_flag(min_heap_size, 2000000),
+  process_flag(priority, high),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_RCVBUF, ?RCVBUF_DEFAULT),
   ok = gen_socket:setsockopt(Socket, ?SOL_SOCKET, ?SO_SNDBUF, ?SNDBUF_DEFAULT),
@@ -150,8 +160,8 @@ handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
   end,
   ok = gen_socket:input_event(Socket, true),
   {noreply, State};
-
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+  lager:info("Received unknown info: ~p", [Info]),
   {noreply, State}.
 
 %%--------------------------------------------------------------------
@@ -194,10 +204,11 @@ code_change(_OldVsn, State, _Extra) ->
 nfnl_query(Socket, Query) ->
   Request = netlink:nl_ct_enc(Query),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
-  Answer = gen_socket:recv(Socket, 8192),
-  case Answer of
-    {ok, Reply} ->
-      lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
+  gen_socket:input_event(Socket, true),
+  receive
+    {Socket, input_ready} ->
+      {ok, Reply} = gen_socket:recv(Socket, 8192),
+      ?MM_LOG("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
@@ -209,9 +220,7 @@ nfnl_query(Socket, Query) ->
           {error, Msg};
         Other ->
           Other
-      end;
-    Other ->
-      Other
+      end
   end.
 
 
@@ -230,8 +239,6 @@ try_mapping(Mapping, Socket) ->
   case Status of
     ok ->
       ok;
-    {error, ?MAYBE_DUPLICATE_CONNTRACK} ->
-      retry_mapping(Mapping, Socket);
     {error, Error} ->
       lager:warning("Mapping Status Error: ~p", [Error]),
       {error, Error};
@@ -240,38 +247,7 @@ try_mapping(Mapping, Socket) ->
       {error, unknown}
   end.
 
--spec(retry_mapping(#mapping{}, gen_socket:socket()) -> ok | {error, Reason :: term()}).
-retry_mapping(Mapping, Socket) ->
-  % Try deleting the "old" mapping - we don't really care
-  % if it suceeds or not
-  MsgDelete = build_ctnetlink_msg_delete(Mapping),
-  _DeleteStatus = nfnl_query(Socket, MsgDelete),
-  % Go back into creating the mapping
-  MsgCreate = build_ctnetlink_msg_create(Mapping),
-  CreateStatus = nfnl_query(Socket, MsgCreate),
-  case CreateStatus of
-    ok ->
-      ok;
-    {error, Error} ->
-      lager:warning("Retried Mapping Status Error: ~p", [Error]),
-      {error, Error};
-    _ ->
-      lager:debug("Retried Mapping Status: ~p", [CreateStatus]),
-      {error, unknown}
-  end.
 
--spec(build_ctnetlink_msg_delete(#mapping{}) -> [#ctnetlink{}]).
-build_ctnetlink_msg_delete(Mapping) ->
-  Seq = erlang:time_offset() + erlang:monotonic_time(),
-  TupleOrig = tuple_orig(Mapping),
-  TupleReply = tuple_reply(Mapping),
-  Cmd = {inet, 0, 0, [
-    TupleOrig,
-    TupleReply,
-    {protoinfo, [{tcp, []}]}
-  ]},
-  Msg = [#ctnetlink{type = delete, flags = [request, ack], seq = Seq, pid = 0, msg = Cmd}],
-  Msg.
 
 -spec(build_ctnetlink_msg_create(#mapping{}) -> [#ctnetlink{}]).
 build_ctnetlink_msg_create(Mapping) ->
@@ -285,7 +261,7 @@ build_ctnetlink_msg_create(Mapping) ->
     {protoinfo, [{tcp, [{state, syn_sent}]}]},
     {nat_src,
       [{v4_src, Mapping#mapping.new_src_ip},
-        {src_port, [{min_port, Mapping#mapping.new_src_port}, {max_port, Mapping#mapping.new_src_port}]}]},
+        {src_port, [{min_port, 1}, {max_port, 65534}]}]},
     {nat_dst,
       [{v4_dst, Mapping#mapping.new_dst_ip},
         {dst_port, [{min_port, Mapping#mapping.new_dst_port}, {max_port, Mapping#mapping.new_dst_port}]}]}

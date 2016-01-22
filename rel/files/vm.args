@@ -1,6 +1,3 @@
-## Name of the node
--name minuteman@127.0.0.1
-
 ## Cookie for distributed erlang
 -setcookie minuteman
 
@@ -23,6 +20,6 @@
 +C multi_time_warp
 +c true
 
-+stbt nnts
-
 -epmd_port 61420
+
+-connect_all false

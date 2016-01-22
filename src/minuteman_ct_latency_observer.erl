@@ -94,6 +94,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
+  process_flag(min_heap_size, 2000000),
   minuteman_vip_events:add_sup_handler(fun push_vips/1),
   ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table]),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),

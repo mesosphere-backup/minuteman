@@ -70,6 +70,8 @@ start_link(Queue) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([Queue]) ->
+  process_flag(min_heap_size, 2000000),
+  process_flag(priority, high),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   %% Our fates are linked.
   {gen_socket, RealPort, _, _, _, _} = Socket,
@@ -113,6 +115,9 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_cast({accept_packet, Info}, State) ->
+  accept_packet(Info, State),
+  {noreply, State};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -194,10 +199,10 @@ nfnl_query(Socket, Query) ->
   Request = netlink:nl_ct_enc(Query),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
   Answer = gen_socket:recv(Socket, 8192),
-  lager:debug("Answer: ~p~n", [Answer]),
+  ?MM_LOG("Answer: ~p~n", [Answer]),
   case Answer of
     {ok, Reply} ->
-      lager:debug("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
+      ?MM_LOG("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
@@ -239,7 +244,7 @@ nfq_set_mode(Socket, Queue, CopyMode, CopyLen) ->
 process_nfq_msgs([], _State) ->
   ok;
 process_nfq_msgs([Msg|Rest], State) ->
-  lager:debug("NFQ-Msg: ~p~n", [Msg]),
+  ?MM_LOG("NFQ-Msg: ~p~n", [Msg]),
   process_nfq_msg(Msg, State),
   process_nfq_msgs(Rest, State).
 
@@ -247,15 +252,9 @@ process_nfq_msgs([Msg|Rest], State) ->
 process_nfq_msg({queue, packet, _Flags, _Seq, _Pid, Packet}, State) ->
   process_nfq_packet(Packet, State).
 
-process_nfq_packet({Family, _Version, _Queue, Info}, _State = #state{socket = Socket, queue = Queue})
+process_nfq_packet({Family, _Version, _Queue, Info}, _State)
   when Family == inet; Family == inet6 ->
-  handle_packet(Queue, Info),
-  {_, Id, _, _} = lists:keyfind(packet_hdr, 1, Info),
-  lager:debug("Verdict for ~p~n", [Id]),
-  NLA = [{verdict_hdr, ?NF_ACCEPT, Id}],
-  Msg = {queue, verdict, [request], 0, 0, {unspec, 0, Queue, NLA}},
-  Request = netlink:nl_ct_enc(Msg),
-  gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request);
+  minuteman_packet_handler:handle(self(), Info);
 
 process_nfq_packet({_Family, _Version, _Queue, Info},
   #state{socket = Socket, queue = Queue}) ->
@@ -266,6 +265,12 @@ process_nfq_packet({_Family, _Version, _Queue, Info},
   Request = netlink:nl_ct_enc(Msg),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
 
-handle_packet(Queue, Info) ->
-  {payload, Payload} = lists:keyfind(payload, 1, Info),
-  minuteman_packet_handler:handle(Queue, Payload).
+
+accept_packet(Info, _State = #state{queue = Queue, socket = Socket}) ->
+  {_, Id, _, _} = lists:keyfind(packet_hdr, 1, Info),
+  NLA = [{verdict_hdr, ?NF_ACCEPT, Id}],
+  Msg = {queue, verdict, [request], 0, 0, {unspec, 0, Queue, NLA}},
+  Request = netlink:nl_ct_enc(Msg),
+  gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
+
+

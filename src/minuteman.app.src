@@ -11,6 +11,7 @@
                   inets,
                   pkt,
                   jsx,
+                  lashup,
                   gen_socket,
                   mochiweb,
                   webmachine

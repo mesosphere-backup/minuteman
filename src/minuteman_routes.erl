@@ -35,7 +35,7 @@
 -define(ROUTE_CACHE_TIME_SECONDS, 10).
 
 -record(route_cache, {addr = {0, 0, 0, 0} :: inet:ip4_address(), timestamp = 0 :: integer(), route = [] :: nla()}).
--record(state, {socket = erlang:error() :: gen_socket:socket(), table_id = erlang:error() :: ets:tid()}).
+-record(state, {socket = erlang:error() :: gen_socket:socket()}).
 %% TODO: define a route,
 %% They look roughly like:
 %[{dst,{8,8,8,8}},
@@ -51,7 +51,16 @@
 
 -spec(get_route(Addr :: inet:ip4_address()) -> {ok, Route :: route()} | {error, Reason :: term()}).
 get_route(Addr) when is_tuple(Addr) ->
-  gen_server:call(?SERVER, {get_route, Addr}).
+  Now = erlang:monotonic_time(seconds),
+  Multiplier = 1 + random:uniform(),
+  RCRandomizer = ?ROUTE_CACHE_TIME_SECONDS * Multiplier,
+  case ets:lookup(?MODULE, Addr) of
+    [#route_cache{timestamp = Timestamp, route = Route}] when (Now - Timestamp) < RCRandomizer ->
+      {ok, Route};
+    _ ->
+      gen_server:call(?SERVER, {get_route, Addr})
+  end.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -82,7 +91,7 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  TableID = ets:new(route_cache, [set, {keypos, #route_cache.addr}]),
+  ?MODULE = ets:new(?MODULE, [named_table, set, {keypos, #route_cache.addr}]),
   %% TODO: Return error, don't just bail
   {unix, linux} = os:type(),
   {ok, Socket} = gen_socket:socket(netlink, raw, ?NETLINK_ROUTE),
@@ -90,7 +99,7 @@ init([]) ->
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
   ok = gen_socket:bind(Socket, netlink:sockaddr_nl(netlink, 0, 0)),
-  {ok, #state{socket = Socket, table_id = TableID}}.
+  {ok, #state{socket = Socket}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -108,8 +117,8 @@ init([]) ->
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
 %% TODO: Caching.
-handle_call({get_route, Addr}, _From, State = #state{socket = Socket, table_id = TableID}) ->
-  Reply = handle_get_route(Addr, Socket, TableID),
+handle_call({get_route, Addr}, _From, State = #state{socket = Socket}) ->
+  Reply = handle_get_route(Addr, Socket),
   {reply, Reply, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -198,25 +207,27 @@ nfnl_query(Socket, Query) ->
       Other
   end.
 
--spec(maybe_update_cache(Timestamp :: integer(), Address :: inet:ip4_address(), TableID :: ets:tid(),
+-spec(maybe_update_cache(Timestamp :: integer(), Address :: inet:ip4_address(),
   {ok, Route :: route()} | {error, Reason :: term()}) -> {ok, Route :: route()} | {error, Reason :: term()}).
-maybe_update_cache(Timestamp, Address, TableId, {ok, Route}) ->
+maybe_update_cache(Timestamp, Address, {ok, Route}) ->
   Route1 = [{route_cache_timestamp, Timestamp}|Route],
-  ets:insert(TableId, #route_cache{addr = Address, timestamp = Timestamp, route = Route1}),
+  ets:insert(?MODULE, #route_cache{addr = Address, timestamp = Timestamp, route = Route1}),
   {ok, Route1};
-maybe_update_cache(_, _, _, Else) -> Else.
+maybe_update_cache(_, _, Else) -> Else.
 
 
--spec(handle_get_route(Addr :: inet:ip4_address(), Socket :: gen_socket:socket(), TableID :: ets:tid()) ->
-  {ok, Route :: route} | {error, Reason :: term()}).
-handle_get_route(Addr, Socket, TableID) ->
+-spec(handle_get_route(Addr :: inet:ip4_address(), Socket :: gen_socket:socket()) ->
+  {ok, Route :: route()} | {error, Reason :: term()}).
+handle_get_route(Addr, Socket) ->
+  %% If we've gotten to this point, the cache was busted
+  %% But we still check it because thundering herd
   Now = erlang:monotonic_time(seconds),
-  case ets:lookup(TableID, Addr) of
+  case ets:lookup(?MODULE, Addr) of
     [#route_cache{timestamp = Timestamp, route = Route}] when (Now - Timestamp) < ?ROUTE_CACHE_TIME_SECONDS ->
       {ok, Route};
     _ ->
       Route = handle_get_route_real(Addr, Socket),
-      maybe_update_cache(Now, Addr, TableID, Route)
+      maybe_update_cache(Now, Addr, Route)
   end.
 
 
@@ -260,10 +271,10 @@ basic_test() ->
   end.
 basic_test_real() ->
   {ok, State} = init([]),
-  {ok, Response} = handle_get_route({8, 8, 8, 8}, State#state.socket, State#state.table_id),
+  {ok, Response} = handle_get_route({8, 8, 8, 8}, State#state.socket),
   ?assertNotEqual(proplists:get_value(prefsrc, Response, undefined), undefined),
-  ?assertNotEqual(proplists:get_value(gateway, Response, undefined), undefined).
-
+  ?assertNotEqual(proplists:get_value(gateway, Response, undefined), undefined),
+  ets:delete(?MODULE).
 cache_test() ->
   case os:type() of
     {unix, linux} ->
@@ -272,12 +283,19 @@ cache_test() ->
       ?debugMsg("Unsupported OS")
   end.
 cache_test_real() ->
-  {ok, State} = init([]),
-  {ok, Response1} = handle_get_route({8, 8, 8, 8}, State#state.socket, State#state.table_id),
-  {ok, Response2} = handle_get_route({8, 8, 8, 8}, State#state.socket, State#state.table_id),
+  State = case init([]) of
+            {ok, S} ->
+              S;
+            Val ->
+              ?debugFmt("Bad State: ~p", [Val]),
+              exit(bad_state)
+          end,
+  {ok, Response1} = handle_get_route({8, 8, 8, 8}, State#state.socket),
+  {ok, Response2} = handle_get_route({8, 8, 8, 8}, State#state.socket),
   ?assertEqual(Response1, Response2),
   ?assertNotEqual(proplists:get_value(route_cache_timestamp, Response1, undefined), undefined),
-  ?assertNotEqual(proplists:get_value(route_cache_timestamp, Response2, undefined), undefined).
+  ?assertNotEqual(proplists:get_value(route_cache_timestamp, Response2, undefined), undefined),
+  ets:delete(?MODULE).
 
   -endif.
 

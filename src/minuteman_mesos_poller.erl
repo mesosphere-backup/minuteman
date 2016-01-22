@@ -78,6 +78,9 @@ start_link() ->
 init([]) ->
   ok = timer:start(),
   {ok, _} = timer:send_after(minuteman_config:poll_interval(), poll),
+  %% 64MB
+  process_flag(min_heap_size, 8000000),
+  process_flag(priority, low),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
