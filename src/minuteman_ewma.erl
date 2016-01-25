@@ -78,6 +78,8 @@ pick_backend(Backends) ->
 %% @doc
 %%--------------------------------------------------------------------
 get_ewma({IP, Port}) ->
+  %% TODO(tyler) remove gen_server, hit ets directly and handle case
+  %% where the table is queried before being created.
   gen_server:call(?SERVER, {get_ewma, {IP, Port}}).
 
 %%--------------------------------------------------------------------
