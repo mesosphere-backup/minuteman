@@ -23,3 +23,9 @@
 -epmd_port 61420
 
 -connect_all false
+
+## Increase atom count 4x
++t 4194304
+
+# This file MUST have extra new lines at the end
+

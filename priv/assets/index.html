@@ -1,0 +1,50 @@
+<html>
+<head>
+    <script src="http://code.jquery.com/jquery-1.9.1.js"></script>
+    <script>
+        function onReady() {
+            $.ajax({
+                dataType: "json",
+                url: "/lashup/gm",
+            }).done(function(data) { handleData(data)});
+        }
+        function handleData(data) {
+            $(data).each(
+                    function(index, element) {
+                        row = ''
+                        node = element.node;
+                        lastHeard = element.time_since_last_heard;
+                        ip = element.metadata.ips[0];
+                        reachable = element.metadata.reachable;
+                        console.log(element);
+                        if (reachable == true)
+                        {
+                            row = row + '<tr style="background-color:green">'
+                        } else {
+                            row = row + '<tr style="background-color:red">'
+                        };
+                        row = row + '<td>' + node + '</td>';
+                        row = row + '<td>' + ip + '</td>';
+                        row = row + '<td>' + reachable + '</td>';
+                        row = row + '<td>' + lastHeard + '</td>';
+                        row = row + '</tr>';
+                        $('#nodes').append(row);
+                    }
+            );
+        };
+
+
+        $( document ).ready(onReady);
+    </script>
+</head>
+
+<body>
+<table border="5" cellpadding="0" width="100%" id='nodes'>
+    <tr>
+        <td>Node</td>
+        <td>IPs</td>
+        <td>Reachable</td>
+        <td>Milliseconds since last heard</td>
+    </tr>
+</table>
+</body>

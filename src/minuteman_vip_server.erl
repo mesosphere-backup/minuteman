@@ -13,7 +13,8 @@
 -behaviour(gen_server).
 
 %% API
--export([stop/0, start_link/0, push_vips/1, get_backend/1, get_backend/2, get_vips/0, get_backends_for_vip/2]).
+-export([stop/0, start_link/0, push_vips/1, get_backend/1, get_backend/2, get_vips/0,
+  get_backends_for_vip/2, get_backends_for_vip/1, push_vips_sync/1, start_link_nosubscribe/0]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -26,6 +27,7 @@
 -include("minuteman.hrl").
 
 -ifdef(TEST).
+-include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 -export([initial_state/0, command/1, precondition/2, postcondition/3, next_state/3]).
@@ -33,9 +35,8 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {vips = dict:new()}).
+-record(state, {}).
 
--type vips() :: dict:dict().
 
 %%%===================================================================
 %%% API
@@ -61,6 +62,12 @@ get_backend({IP, Port}) when is_tuple(IP) andalso is_integer(Port) ->
       error
   end.
 
+
+push_vips_sync(Vips) ->
+  lager:debug("Pushing Vips: ~p", [Vips]),
+  gen_server:call(?SERVER, {push_vips, Vips}),
+  ok.
+
 push_vips(Vips) ->
   lager:debug("Pushing Vips: ~p", [Vips]),
   gen_server:cast(?SERVER, {push_vips, Vips}),
@@ -69,8 +76,11 @@ push_vips(Vips) ->
 get_vips() ->
   gen_server:call(?SERVER, get_vips).
 
-get_backends_for_vip(Ip, Port) ->
-  gen_server:call(?SERVER, {get_backends_for_vip, {Ip, Port}}).
+get_backends_for_vip(IP, Port) ->
+  get_backends_for_vip({IP, Port}).
+
+get_backends_for_vip({IP, Port})  when is_tuple(IP) andalso is_integer(Port)  ->
+  gen_server:call(?SERVER, {get_backends_for_vip, {IP, Port}}).
 
 stop() ->
   gen_server:call(?MODULE, stop).
@@ -85,6 +95,9 @@ stop() ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
 start_link() ->
   gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link_nosubscribe() ->
+  gen_server:start_link({local, ?SERVER}, ?MODULE, [nosubscribe], []).
+
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -105,11 +118,11 @@ start_link() ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  ets:new(vips, [named_table, set, {read_concurrency, true}]),
-  %% 16MB,
-  process_flag(min_heap_size, 2000000),
-  process_flag(priority, low),
+  setup(),
   minuteman_vip_events:add_sup_handler(fun push_vips/1),
+  {ok, #state{}};
+init([nosubscribe]) ->
+  setup(),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -127,13 +140,17 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({get_backend, IP, Port}, _From, State = #state{vips = Vips}) ->
-  {reply, choose_backend(IP, Port, Vips), State};
-handle_call(get_vips, _From, State = #state{vips = Vips}) ->
+handle_call({push_vips, Vips}, _From, State) ->
+  handle_push_vips(Vips),
+  {reply, ok, State};
+handle_call(get_vips, _From, State = #state{}) ->
+  Vips = handle_get_vips(),
   {reply, Vips, State};
-handle_call({get_backends_for_vip, {Ip, Port}}, _From, State = #state{vips = Vips}) ->
-  Backends = backends_for_vip(Ip, Port, Vips),
+handle_call({get_backends_for_vip, {Ip, Port}}, _From, State) ->
+  Backends = handle_backends_for_vip(Ip, Port),
   {reply, Backends, State};
+handle_call(stop, _From, State) ->
+  {stop, normal, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -149,12 +166,8 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast({push_vips, Vips}, State) ->
-  CurrentVIPs = ets:foldl(fun({Key, _Value}, Acc) -> [Key|Acc] end, [], vips),
-  Keys = [Key || {Key, _Value} <- Vips],
-  VipsToDelete = Keys -- CurrentVIPs,
-  [ets:delete(vips, Key) || Key <- VipsToDelete],
-  [ets:insert(vips, Vip) || Vip <- Vips],
-  {noreply, State#state{vips = Vips}};
+  handle_push_vips(Vips),
+  {noreply, State};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -191,33 +204,6 @@ handle_info(_Info, State) ->
 terminate(_Reason, _State) ->
   ok.
 
--spec(choose_backend(inet:ip4_address(), inet:port_number(), vips()) -> term()).
-choose_backend(IP, Port, Vips) ->
-  %% We assume, and only support tcp right now
-  case backends_for_vip(IP, Port, Vips) of
-    {ok, Backends} ->
-      case minuteman_ewma:pick_backend(Backends) of
-        {ok, Backend} ->
-          {ok, Backend#backend.ip_port};
-        {error, Reason} ->
-          lager:warning("failed to retrieve backend for vip {tcp, ~p, ~B}: ~p", [IP, Port, Reason]),
-          error
-      end;
-    error ->
-      error
-  end.
-
--spec(backends_for_vip(inet:ip4_address(), inet:port_number(), vips()) -> term()).
-backends_for_vip(IP, Port, Vips) ->
-  case dict:find({tcp, IP, Port}, Vips) of
-    {ok, []} ->
-      %% This should never happen, but it's better than crashing
-      error;
-    {ok, Backends} ->
-      {ok, Backends};
-    error ->
-      error
-  end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -236,23 +222,52 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--ifdef(TEST).
+handle_get_vips() ->
+  orddict:from_list(ets:tab2list(vips)).
 
-proper_test() ->
-  [] = proper:module(?MODULE).
+handle_push_vips(Vips) ->
+  CurrentVIPs = ets:foldl(fun({Key, _Value}, Acc) -> [Key|Acc] end, [], vips),
+  Keys = orddict:fetch_keys(Vips),
+  KeysSet = ordsets:from_list(Keys),
+  CurrentVIPsSet = ordsets:from_list(CurrentVIPs),
+  VipsToDelete = ordsets:subtract(CurrentVIPsSet, KeysSet),
+  [true = ets:delete(vips, Key) || Key <- VipsToDelete],
+  [true = ets:insert(vips, Vip) || Vip <- Vips].
+
+-spec(handle_backends_for_vip(inet:ip4_address(), inet:port_number()) -> term()).
+handle_backends_for_vip(IP, Port) ->
+  case ets:lookup(vips, {tcp, IP, Port}) of
+    [{_Vip, Backends}] ->
+      {ok, Backends};
+    _ ->
+      error
+  end.
+
+setup() ->
+  vips = ets:new(vips, [named_table, set, {read_concurrency, true}]),
+  %% 16MB,
+  process_flag(min_heap_size, 2000000),
+  process_flag(priority, low).
+
+-ifdef(TEST).
+-compile(export_all).
+
+
+-record(test_state, {vips}).
+
+proper_test_() ->
+  {timeout, 60, [fun() -> [] = proper:module(?MODULE, [{numtests, 100}]) end]}.
 
 initial_state() ->
-  #state{vips = dict:new()}.
+  #test_state{vips = []}.
 
 prop_server_works_fine() ->
     ?FORALL(Cmds, commands(?MODULE),
             ?TRAPEXIT(
                 begin
-                    minuteman_vip_events:start_link(),
-                    ?MODULE:start_link(),
+                    ?MODULE:start_link_nosubscribe(),
                     {History, State, Result} = run_commands(?MODULE, Cmds),
                     gen_server:stop(?MODULE),
-                    gen_server:stop(minuteman_vip_events),
                     ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
                                         [History, State, Result]),
                               Result =:= ok)
@@ -260,10 +275,19 @@ prop_server_works_fine() ->
 
 precondition(_, _) -> true.
 
+postcondition(_State  = #test_state{vips = VIPs}, {call, _, get_backends_for_vip, [VIP]}, Result) ->
+  case orddict:find(VIP, VIPs) of
+    error ->
+      Result == error;
+    {ok, Backends} ->
+      Result == Backends
+  end;
+postcondition(_State  = #test_state{vips = VIPs}, {call, _, get_vips, []}, Result) ->
+  orddict:from_list(VIPs) == orddict:from_list(Result);
 postcondition(_, _, _) -> true.
 
-next_state(S, _V, {call, _, push_vips, [VIPs]}) ->
-      S#state{vips = VIPs};
+next_state(S, _V, {call, _, push_vips_sync, [VIPs]}) ->
+      S#test_state{vips = VIPs};
 next_state(S, _, _) ->
   S.
 
@@ -272,20 +296,37 @@ ip() ->
        {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
        {I1, I2, I3, I4}).
 
+port() ->
+  ?LET(Port, integer(0, 65535), Port).
+
 ip_port() ->
   ?LET({IP, Port},
-       {ip(), integer(0, 65535)},
+       {ip(), port()},
        {IP, Port}).
 
 vip() ->
-  ?LET({VIP, Backend}, {ip_port(), ip_port()}, {VIP, Backend}).
+  ?LET({{tcp, IP, Port}, Backends}, {{tcp, ip(), port()}, non_empty(list(ip_port()))}, {{tcp, IP, Port}, Backends}).
 
+merge(Dict, []) ->
+  Dict;
+merge(Dict, [VipBackend|VipsBackends]) ->
+  Dict1 = orddict:merge(fun(_Key, V1, V2) -> lists:usort(V1 ++ V2) end, Dict, VipBackend),
+  merge(Dict1, VipsBackends).
+
+merge(VipsBackends) ->
+  merge([], VipsBackends).
+
+vip_foldfun(VipsBackends) ->
+  merge(VipsBackends).
 vips() ->
-  ?LET(VIPsBackends, list(vip()), lists:foldl(fun({K, V}, Acc) ->
-                                                  orddict:append(K, V, Acc)
-                                              end, orddict:new(), VIPsBackends)).
+  ?LET(VIPsBackends, list(vip()), vip_foldfun([VIPsBackends])).
+
+%% This only works right now because all VIP server state is in ets
+%% the reason behind calling handle_cast directly is to solve the async problem
 command(_S) ->
     oneof([{call, ?MODULE, get_backend, [ip_port()]},
-           {call, ?MODULE, push_vips, [vips()]}]).
+           {call, ?MODULE, push_vips_sync, [vips()]},
+           {call, ?MODULE, get_vips, []},
+           {call, ?MODULE, get_backends_for_vip, [ip_port()]}]).
 
 -endif.

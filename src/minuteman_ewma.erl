@@ -149,6 +149,8 @@ handle_call(clear, _From, State) ->
   {reply, ok, State};
 handle_call({get_ewma, {IP, Port}}, _From, State) ->
   {reply, get_ewma_or_default({IP, Port}), State};
+handle_call(stop, _From, State) ->
+  {stop, normal, ok, State};
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -337,6 +339,7 @@ decrement_pending(_, Ewma) ->
 
 
 pick_backend_internal(BackendAddrs) when length(BackendAddrs) > ?BACKEND_LIMIT ->
+  minuteman_metrics:update([probabilistic_backend_picker], 1, spiral),
   Now = erlang:monotonic_time(),
   ReachabilityCache = dict:new(),
   Choice = probabilistic_backend_chooser(Now, ReachabilityCache, BackendAddrs, [], [], []),
@@ -344,6 +347,7 @@ pick_backend_internal(BackendAddrs) when length(BackendAddrs) > ?BACKEND_LIMIT -
 
 
 pick_backend_internal(BackendAddrs) ->
+  minuteman_metrics:update([simple_backend_picker], 1, spiral),
   %% Pull backends out of ets.
   Now = erlang:monotonic_time(),
   Backends = [get_ewma_or_default(Backend) || Backend <- BackendAddrs],
@@ -362,7 +366,7 @@ pick_backend_internal(BackendAddrs) ->
   {ReachableTrue, ReachableFalse} = lists:partition(
     fun(Backend) ->
       {IP, _Port} = Backend#backend.ip_port,
-      ets:lookup(reachability_cache, IP) == [{IP, true}]
+      is_reachable_real(IP)
     end,
     Choices),
 
@@ -412,6 +416,7 @@ pop_item_from_list(List) ->
 ).
 probabilistic_backend_chooser(_Now, _ReachabilityCache, _RemainingBackendAddrs, ReachableAndOpenBackends,
   _OpenBackends, _OtherBackends) when length(ReachableAndOpenBackends) == 2 ->
+  minuteman_metrics:update([reachable_open_backend], 1, spiral),
   [Backend1, Backend2] = ReachableAndOpenBackends,
   choose_backend_by_cost(Backend1, Backend2);
 
@@ -473,14 +478,19 @@ probabilistic_backend_chooser(Now, ReachabilityCache, RemainingBackendAddrs, Rea
 ).
 
 make_backend_choice([Backend], _OpenBackends, _OtherBackends) ->
+  minuteman_metrics:update([reachable_open_backend], 1, spiral),
   Backend;
 make_backend_choice(_ReachableAndOpenBackends, [OpenBackend1, OpenBackend2|_], _OtherBackends) ->
+  minuteman_metrics:update([open_backend], 1, spiral),
   choose_backend_by_cost(OpenBackend1, OpenBackend2);
 make_backend_choice(_ReachableAndOpenBackends, [OpenBackend], _OtherBackends) ->
+  minuteman_metrics:update([open_backend], 1, spiral),
   OpenBackend;
 make_backend_choice(_ReachableAndOpenBackends, _OpenBackends, [OtherBackend]) ->
+  minuteman_metrics:update([other_backend], 1, spiral),
   OtherBackend;
 make_backend_choice(_ReachableAndOpenBackends, _OpenBackends, [OtherBackend1, OtherBackend2|_]) ->
+  minuteman_metrics:update([other_backend], 1, spiral),
   choose_backend_by_cost(OtherBackend1, OtherBackend2);
 make_backend_choice(_, _, _) ->
   exit(bad_state).
@@ -499,9 +509,18 @@ is_reachable(ReachabilityCache, IP) ->
     {ok, Value} ->
       {ReachabilityCache, Value};
     _ ->
-      Reachable = [{IP, true}] == ets:lookup(reachability_cache, IP),
+      Reachable = is_reachable_real(IP),
       ReachabilityCache1 = dict:store(IP, Reachable, ReachabilityCache),
       {ReachabilityCache1, Reachable}
+  end.
+
+%% Don't crash if lashup is broken
+is_reachable_real(IP) ->
+  case catch ets:lookup(reachability_cache, IP) of
+    [{IP, true}] ->
+      true;
+    _ ->
+      false
   end.
 
 get_ewma_or_default({IP, Port}) ->

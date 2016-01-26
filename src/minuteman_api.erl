@@ -14,6 +14,7 @@
          content_types_provided/2,
          to_json/2]).
 
+-include_lib("stdlib/include/ms_transform.hrl").
 -include("minuteman.hrl").
 -include_lib("webmachine/include/webmachine.hrl").
 
@@ -37,6 +38,8 @@ to_json(RD, Ctx) ->
 %% This is the top-level view of stats for a node.
 %% @end
 %%--------------------------------------------------------------------
+metrics_for_path("/metrics", _) ->
+  all_metrics();
 metrics_for_path("/vips", _) ->
   vip_metrics();
 metrics_for_path("/vips/", _) ->
@@ -74,13 +77,49 @@ parse_ip_port(IpPort) ->
       error
   end.
 
+all_metrics() ->
+  Selector = ets:fun2ms(fun(_Metric = {Name, Type, Enabled}) when Enabled == enabled -> {Name, Type} end),
+  Metrics = exometer:select(Selector),
+  lists:foldl(fun metric_to_json/2, #{}, Metrics).
+
+metric_to_json({MetricName, MetricType}, Acc) ->
+  lager:debug("Handling Metric: ~p", [MetricName]),
+  case exometer:get_value(MetricName) of
+    {ok, Value} ->
+      Name = metric_name(MetricName, MetricType),
+      Dict = maps:from_list(Value),
+      Dict1 = Dict#{type => MetricType},
+      Acc#{Name => Dict1};
+    _ ->
+      Acc
+  end.
+
+metric_name(MetricName, MetricType) ->
+  MetricNameStrings = [to_string(Component) || Component <- MetricName],
+  MetricNameStrings2 = MetricNameStrings ++ [to_string(MetricType)],
+  FlatList = lists:flatten(string:join(MetricNameStrings2, "_")),
+  list_to_binary(FlatList).
+
+to_string({VIP, Port})
+    when is_tuple(VIP) andalso is_integer(Port) andalso tuple_size(VIP) == 4 ->
+  VIPComponents = [inet:ntoa(VIP), to_string(Port)],
+  string:join(VIPComponents, ":");
+to_string(Component) when is_binary(Component) ->
+  binary_to_list(Component);
+to_string(Component) when is_atom(Component) ->
+  atom_to_list(Component);
+to_string(Component) when is_list(Component) ->
+  Component;
+to_string(Name) ->
+  SimpleFormat = io_lib:format("~p", [Name]),
+  SimpleFormat.
 
 vip_metrics() ->
   % get all vips
   % get ewma for all current backends
   % get stats for each
   LiveVips = minuteman_vip_server:get_vips(),
-  LiveVipMetrics = dict:fold(fun (Vip, Backends, AccIn) ->
+  LiveVipMetrics = orddict:fold(fun (Vip, Backends, AccIn) ->
                                  VIPIPPort = fmt_ip_port(Vip),
                                  Metrics = metrics_for_backends(Backends),
                                  AccIn#{VIPIPPort => Metrics}

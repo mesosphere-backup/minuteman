@@ -32,23 +32,8 @@ maybe_add_network_child(Children) ->
     end.
 add_default_children(Children) ->
     {ok, _App} = application:get_application(?MODULE),
-
-    Dispatch = lists:flatten([
-                              {["vips"], minuteman_api, []},
-                              {["vip", vip], minuteman_api, []},
-                              {["backend", backend], minuteman_api, []}
-                             ]),
-
-    ApiConfig = [
-        {ip, minuteman_config:api_listen_ip()},
-        {port, minuteman_config:api_listen_port()},
-        {log_dir, "priv/log"},
-        {dispatch, Dispatch}
-    ],
-
-    Webmachine = {webmachine_mochiweb,
-           {webmachine_mochiweb, start, [ApiConfig]},
-           permanent, 5000, worker, [mochiweb_socket_server]},
+    Webmachine = {minuteman_wm, {minuteman_wm, start, []},
+           permanent, 5000, worker, [minuteman_wm, mochiweb_socket_server]},
 
     [
         Webmachine,

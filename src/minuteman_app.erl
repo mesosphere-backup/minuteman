@@ -10,6 +10,7 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
+    minuteman_metrics:setup(),
     minuteman_sup:start_link().
 
 stop(_State) ->

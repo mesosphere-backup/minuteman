@@ -252,8 +252,9 @@ process_nfq_msgs([Msg|Rest], State) ->
 process_nfq_msg({queue, packet, _Flags, _Seq, _Pid, Packet}, State) ->
   process_nfq_packet(Packet, State).
 
-process_nfq_packet({Family, _Version, _Queue, Info}, _State)
+process_nfq_packet({Family, _Version, _Queue, Info}, _State = #state{queue = Id})
   when Family == inet; Family == inet6 ->
+  minuteman_metrics:update([nfq_packets_dispatched, Id], 1, spiral),
   minuteman_packet_handler:handle(self(), Info);
 
 process_nfq_packet({_Family, _Version, _Queue, Info},
@@ -267,6 +268,7 @@ process_nfq_packet({_Family, _Version, _Queue, Info},
 
 
 accept_packet(Info, _State = #state{queue = Queue, socket = Socket}) ->
+  minuteman_metrics:update([nfq_packets_accepted, Queue], 1, spiral),
   {_, Id, _, _} = lists:keyfind(packet_hdr, 1, Info),
   NLA = [{verdict_hdr, ?NF_ACCEPT, Id}],
   Msg = {queue, verdict, [request], 0, 0, {unspec, 0, Queue, NLA}},

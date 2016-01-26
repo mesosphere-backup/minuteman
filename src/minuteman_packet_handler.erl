@@ -41,16 +41,22 @@ start_link(Args) ->
   {ok, Pid}.
 
 do_handle(NFQPid, Info) ->
+  Now1 = erlang:monotonic_time(micro_seconds),
   initialize_seed(),
   {payload, Payload} = lists:keyfind(payload, 1, Info),
-  case to_mapping(Payload) of
+  MappingRet = to_mapping(Payload),
+  Now2 = erlang:monotonic_time(micro_seconds),
+  minuteman_metrics:update([mapping_time_us], Now2-Now1, histogram),
+  case MappingRet of
     {ok, Mapping} ->
       lager:debug("Mapping: ~p", [Mapping]),
       minuteman_ct:install_mapping(Mapping);
     Else ->
       lager:error("Unable to handle mapping: ~p", [Else])
   end,
-  gen_server:cast(NFQPid, {accept_packet, Info}).
+  gen_server:cast(NFQPid, {accept_packet, Info}),
+  Now3 = erlang:monotonic_time(micro_seconds),
+  minuteman_metrics:update([packet_handler_total_time_us], Now3-Now1, histogram).
 
 
 get_src_addr(SrcAddr, BackendIP) ->
@@ -108,20 +114,26 @@ is_local({127, 0, 0, 1}) ->
 is_local(_) ->
   false.
 
-local_to_foreign() ->
 
+%% TODO: Setup test fixtures
+%% TODO: Write Proper tests
+
+local_to_foreign() ->
+  minuteman_vip_server:start_link_nosubscribe(),
+  VIP = {tcp, {1, 1, 1, 1}, 1000},
+  Backend = {{8, 8, 8, 8}, 31421},
+  VIPs = orddict:store(VIP, [Backend], []),
+  minuteman_vip_server:push_vips(VIPs),
+  meck:new(minuteman_routes),
   meck:new(minuteman_iface_server),
   meck:expect(minuteman_iface_server, is_local, fun is_local/1),
-  meck:new(minuteman_vip_server),
-  meck:expect(minuteman_vip_server, get_backend, fun({1, 1, 1, 1}, 1000) -> {ok, {{8, 8, 8, 8}, 31421}} end),
-  meck:new(minuteman_routes),
   meck:expect(minuteman_routes, get_route, fun({8, 8, 8, 8}) -> {ok, [{prefsrc, {9, 9, 9, 9}}]} end),
+  minuteman_ewma:start_link(),
 
   Payload = <<>>,
   TCP = #tcp{sport = 55000, dport = 1000},
   IPv4 = #ipv4{daddr = {1, 1, 1, 1}},
   Packet = <<(pkt:ipv4(IPv4))/binary, (pkt:tcp(TCP))/binary, Payload/binary>>,
-  ?debugFmt("Packet: ~p~n", [ Packet]),
 
   ExpectedMapping = #mapping{
     orig_src_ip = {127, 0, 0, 1},
@@ -132,7 +144,10 @@ local_to_foreign() ->
     new_dst_ip = {8, 8, 8, 8},
     new_dst_port = 31421},
   ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
-  meck:unload().
+  meck:unload(),
+  gen_server:call(minuteman_vip_server, stop),
+  gen_server:call(minuteman_ewma, stop).
+
 
 foreign_to_foreign_test() ->
   Payload = <<>>,
@@ -140,10 +155,15 @@ foreign_to_foreign_test() ->
   IPv4 = #ipv4{saddr = {8, 8, 4, 4}, daddr = {1, 1, 1, 1}},
   Packet = <<(pkt:ipv4(IPv4))/binary, (pkt:tcp(TCP))/binary, Payload/binary>>,
 
+  {ok, _} = minuteman_vip_server:start_link_nosubscribe(),
+  VIP = {tcp, {1, 1, 1, 1}, 1000},
+  Backend = {{8, 8, 8, 8}, 31421},
+  VIPs = orddict:store(VIP, [Backend], []),
+  minuteman_vip_server:push_vips(VIPs),
+  {ok, _} = minuteman_ewma:start_link(),
+
   meck:new(minuteman_iface_server),
   meck:expect(minuteman_iface_server, is_local, fun is_local/1),
-  meck:new(minuteman_vip_server),
-  meck:expect(minuteman_vip_server, get_backend, fun({1, 1, 1, 1}, 1000) -> {ok, {{8, 8, 8, 8}, 31421}} end),
   meck:new(minuteman_routes),
   meck:expect(minuteman_routes, get_route, fun({8, 8, 8, 8}) -> {ok, [{prefsrc, {9, 9, 9, 9}}]} end),
   ExpectedMapping = #mapping{
@@ -155,5 +175,8 @@ foreign_to_foreign_test() ->
     new_dst_ip = {8, 8, 8, 8},
     new_dst_port = 31421},
   ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
-  meck:unload().
+  meck:unload(),
+  ok = gen_server:call(minuteman_vip_server, stop),
+  ok = gen_server:call(minuteman_ewma, stop).
+
 -endif.

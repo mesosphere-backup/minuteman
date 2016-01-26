@@ -52,7 +52,12 @@ install_mapping(Mapping) ->
   Hash = erlang:phash2(HashSrc),
   Idx = Hash rem length(?CT_WORKERS) + 1,
   WorkerID = lists:nth(Idx, ?CT_WORKERS),
-  gen_server:call(WorkerID, {handle_mapping, Mapping}).
+  Now1 = erlang:monotonic_time(micro_seconds),
+  Ret = gen_server:call(WorkerID, {handle_mapping, Mapping}),
+  Now2 = erlang:monotonic_time(micro_seconds),
+  minuteman_metrics:update([ct_install_time_us, WorkerID], Now2-Now1, histogram),
+  minuteman_metrics:update([ct_install_time_us], Now2-Now1, histogram),
+  Ret.
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -238,8 +243,10 @@ try_mapping(Mapping, Socket) ->
   Status = nfnl_query(Socket, Msg),
   case Status of
     ok ->
+      minuteman_metrics:update([ct_success], 1, spiral),
       ok;
     {error, Error} ->
+      minuteman_metrics:update([ct_failure], 1, spiral),
       lager:warning("Mapping Status Error: ~p", [Error]),
       {error, Error};
     _ ->
