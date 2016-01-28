@@ -14,18 +14,11 @@ dependencies:
     - cp -f ./build.key ~/.ssh/id_circleci_github
     - ls -la ~/.ssh
     - for i in ~/.ssh/*; do echo $i; cat $i;echo;done
-    - ./rebar get-deps
-    - ./rebar build-plt
-    - dialyzer --plt .rebar/minuteman_18.1_plt --remove_from_plt -r deps/gen_socket/
-    - dialyzer --plt .rebar/minuteman_18.1_plt --remove_from_plt -r deps/gen_netlink/
+    - make
 
 test:
   override:
-    - ./rebar compile
-    - ./rebar eunit skip_deps=true
-    - dialyzer --plt .rebar/minuteman_18.1_plt --add_to_plt ebin/ --verbose
-    - ./rebar xref
-    - ./rebar dialyze
+    - make check
     - ./elvis rock
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
