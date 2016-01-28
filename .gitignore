@@ -12,3 +12,5 @@ app.config
 .eunit/*erl
 .eunit/*beam
 deps/*
+_build/
+TEST-*

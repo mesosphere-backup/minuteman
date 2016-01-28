@@ -1,3 +1,6 @@
+## Name of the node
+-name minuteman
+
 ## Cookie for distributed erlang
 -setcookie minuteman
 
