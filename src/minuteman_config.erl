@@ -19,7 +19,8 @@
   tcp_consecutive_failure_threshold/0,
   tcp_failed_backend_backoff_period/0,
   api_listen_ip/0,
-  api_listen_port/0
+  api_listen_port/0,
+  agent_reregistration_threshold/0
   ]).
 
 
@@ -51,7 +52,11 @@ api_listen_port() ->
   application:get_env(minuteman, api_listen_port, 61421).
 
 
-%% Returns a integer
+agent_reregistration_threshold() ->
+  application:get_env(minuteman, agent_reregistration_threshold, 60 * 15).
+
+
+%% Returns an integer
 queue() ->
   case application:get_env(minuteman, queue, {50, 58}) of
     X when is_integer(X) ->

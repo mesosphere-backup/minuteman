@@ -31,10 +31,21 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {vips = orddict:new()}).
+-record(state, {
+          vips = orddict:new(),
+          last_master_elected = 0,
+          last_master_elected_local_time = erlang:monotonic_time(seconds),
+          agent_cache = maps:new()
+         }).
+
+-record(agent_cache, {
+          last_seen_time = 0,
+          last_seen_tasks = [],
+          last_seen_ips = []
+         }).
 
 %% Debug
--export([poll/0]).
+-export([poll/1]).
 
 -type task() :: map().
 -type task_status() :: map().
@@ -130,14 +141,14 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(poll, State) ->
-  Vips = case poll() of
+  NewState = case poll(State) of
     {error, Reason} ->
       lager:warning("Could not poll: ~p", [Reason]),
-      State#state.vips;
+      State;
     {ok, NewVips} ->
       NewVips
   end,
-  {noreply, State#state{vips = Vips}};
+  {noreply, NewState};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -175,34 +186,103 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-poll() ->
+-spec(poll(State :: #state{}) -> {atom(), #state{}}).
+poll(State) ->
   lager:debug("Starting poll cycle"),
   {ok, _} = timer:send_after(minuteman_config:poll_interval(), poll),
   MasterURI = minuteman_config:master_uri(),
   Response = httpc:request(get, {MasterURI, []}, [], [{body_format, binary}]),
-  case handle_response(Response) of
-    {ok, Vips} ->
+  case handle_response(State, Response) of
+    {ok, NewState = #state{vips = Vips}} ->
       minuteman_vip_events:push_vips(Vips),
-      {ok, Vips};
+      {ok, NewState};
     Other ->
       Other
   end.
 
-handle_response({ok, {{_HttpVersion, 200, _ReasonPhrase}, _Headers, Body}}) ->
-  Vips = parse_json_to_vips(Body),
-  {ok, Vips};
-handle_response(Response) ->
+handle_response(State, {ok, {{_HttpVersion, 200, _ReasonPhrase}, _Headers, Body}}) ->
+  NewState = parse_json_to_vips(State, Body),
+  {ok, NewState};
+handle_response(_State, Response) ->
   lager:debug("Bad HTTP Response: ~p", [Response]),
   {error, http_error}.
 
--spec(parse_json_to_vips(Data :: binary()) -> Vips :: list(term())).
-parse_json_to_vips(Data) ->
+prune_old_agents(AgentCache) ->
+  map:filter(fun (#agent_cache{last_seen_time = LastSeenTime}) ->
+                   Now = erlang:monotonic_time(seconds),
+                   Now - LastSeenTime =< minuteman_config:agent_reregistration_threshold()
+               end, AgentCache).
+
+%% TODO(tyler) break up this long horrible function
+%% TODO(tyler) test agent_cache
+-spec(parse_json_to_vips(State :: #state{}, Data :: binary()) -> #state{}).
+parse_json_to_vips(State = #state{last_master_elected = LastMaster,
+                                  last_master_elected_local_time = LastMasterTime,
+                                  agent_cache = AgentCache},
+                   Data) ->
   Parsed = jsx:decode(Data, [return_maps, {labels, atom}]),
+  ElectedTime = maps:get(elected_time, Parsed),
+  Now = erlang:monotonic_time(seconds),
+
+  LastMasterCanKillOldAgents = Now - LastMasterTime > minuteman_config:agent_reregistration_threshold(),
+  State2 = case {ElectedTime == LastMaster, LastMasterCanKillOldAgents} of
+             {false, _} ->
+               State#state{last_master_elected = ElectedTime,
+                           last_master_elected_local_time = Now};
+             {true, true} ->
+               %% This master is old enough to have invalidated any tasks on
+               %% slaves that have not yet reconnected.
+               PrunedCache = prune_old_agents(AgentCache),
+               State#state{agent_cache = PrunedCache};
+             {true, _} ->
+               %% This master is not old enough to trust with agent evictions
+               State
+           end,
+
   Frameworks = maps:get(frameworks, Parsed),
   Agents = maps:get(slaves, Parsed),
-  AgentIPs = get_agent_ips(Agents),
-  Vips = framework_fold(AgentIPs, Frameworks, orddict:new()),
-  Vips.
+  FrameworkTasks = frameworks_to_tasks(Frameworks),
+
+  RawActiveAgents = lists:filter(fun(Agent) ->
+                                     maps:get(active, Agent)
+                                 end, Agents),
+
+  %% Get a map from agent ID to #agent_cache{}, we will trust these active agents
+  ActiveAgents = lists:foldl(fun(#{pid := Pid, id := Id}, AccIn) ->
+                                 AgentTasks = lists:filter(fun (Task) ->
+                                                               TaskAgent = maps:get(slave_id, Task),
+                                                               TaskAgent == Id
+                                                           end, FrameworkTasks),
+                                 IP = libprocess_pid_to_ip(Pid),
+                                 AccIn#{Id => #agent_cache{last_seen_time = Now,
+                                                           last_seen_tasks = AgentTasks,
+                                                           last_seen_ips = IP}}
+                             end, #{}, RawActiveAgents),
+
+  %% Merge cached tasks with tasks from active agents
+  CachedAgents = State2#state.agent_cache,
+  MergedAgentCache = maps:merge(CachedAgents, ActiveAgents),
+  State3 = State2#state{agent_cache = MergedAgentCache},
+
+  MergedTasks = maps:fold(fun (_Agent, #agent_cache{last_seen_tasks = AgentTasks}, AccIn) ->
+                              lists:flatten([AgentTasks | AccIn])
+                          end, [], MergedAgentCache),
+
+  AgentIPs = get_agent_ips(MergedAgentCache),
+
+  FoldFun = task_fold_fun(AgentIPs),
+  Vips = lists:foldl(FoldFun, orddict:new(), MergedTasks),
+
+  State3#state{vips = Vips}.
+
+frameworks_to_tasks(Frameworks) ->
+  frameworks_to_tasks(Frameworks, []).
+
+frameworks_to_tasks([], AccIn) ->
+  lists:flatten(AccIn);
+frameworks_to_tasks([#{tasks := Tasks}|RestFrameworks], AccIn) ->
+  frameworks_to_tasks(RestFrameworks, [Tasks | AccIn]).
+
 
 libprocess_pid_to_ip(LibprocessPid) when is_binary(LibprocessPid) ->
   libprocess_pid_to_ip(binary_to_list(LibprocessPid));
@@ -213,24 +293,13 @@ libprocess_pid_to_ip(LibprocessPid) ->
   IP.
 
 
-get_agent_ips(Agents) ->
+get_agent_ips(AgentCache) ->
   FoldFun =
-    fun(_Agent = #{pid := Pid, id := Id}, AccIn) ->
-      IP = libprocess_pid_to_ip(Pid),
-      orddict:store(Id, [IP], AccIn)
+    fun(ID, #agent_cache{last_seen_ips = IP}, AccIn) ->
+      orddict:store(ID, [IP], AccIn)
     end,
-  lists:foldl(FoldFun, orddict:new(), Agents).
+  maps:fold(FoldFun, orddict:new(), AgentCache).
 
-%get_framework_fold(SlaveIPs) ->
-framework_fold(_AgentIPs, [], AccIn) ->
-  AccIn;
-framework_fold(AgentIPs, [#{tasks := Tasks}|RestFrameworks], AccIn) ->
-
-  FoldFun = task_fold_fun(AgentIPs),
-  AccIn2 = lists:foldl(FoldFun, AccIn, Tasks),
-  framework_fold(AgentIPs, RestFrameworks, AccIn2);
-framework_fold(AgentIPs, [_|RestFrameworks], AccIn) ->
-  framework_fold(AgentIPs, RestFrameworks, AccIn).
 
 %% Wrapper fun to make task_fold into a higher order function
 %% It's a separate function to avoid capturing excessive
@@ -244,6 +313,7 @@ task_fold_fun(AgentIPs) ->
       Acc
     end
   end.
+
 -spec task_fold(AgentIPs :: orddict:orddict(), [task()], orddict:orddict()) -> orddict:orddict().
 task_fold(_AgentIPs, _Task = #{statuses := []}, AccIn) ->
   AccIn;
