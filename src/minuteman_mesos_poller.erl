@@ -466,10 +466,11 @@ prop_valid_states_parse() ->
   ?FORALL(S, mesos_state(), parses(S)).
 
 parses(S) ->
-  {ok, _} = handle_response({ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
+  {ok, _} = handle_response(#state{}, {ok, {{0, 200, 0}, 0, jsx:encode(S)}}).
 
 mesos_state() ->
-  ?LET(F, list(p_framework()), #{
+  ?LET({F, ET}, {list(p_framework()), integer(1449789489, 2549789489)}, #{
+    elected_time => float(ET),
     frameworks => F,
     slaves => []
   }).
@@ -617,7 +618,7 @@ not_error(_) ->
 
 two_health_check_free_vips_test() ->
   {ok, Data} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
-  Vips = parse_json_to_vips(Data),
+  #state{vips = Vips} = parse_json_to_vips(#state{}, Data),
   Expected = [
     {
       {tcp, {4, 3, 2, 1}, 1234},
@@ -638,7 +639,7 @@ two_health_check_free_vips_test() ->
 
 docker_basic_test() ->
   {ok, Data} = file:read_file("testdata/docker.json"),
-  Vips = parse_json_to_vips(Data),
+  #state{vips = Vips} = parse_json_to_vips(#state{}, Data),
   Expected = [
     {
       {tcp, {1, 2, 3, 4}, 5000},
@@ -650,7 +651,7 @@ docker_basic_test() ->
   ?assertEqual(Expected, Vips).
 bad_state_test() ->
   {ok, Data} = file:read_file("testdata/bad-state-gaal.json"),
-  Vips = parse_json_to_vips(Data),
+  #state{vips = Vips} = parse_json_to_vips(#state{}, Data),
   Expected = [
     {
       {tcp, {10, 22, 126, 49}, 5000},
