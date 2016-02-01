@@ -214,7 +214,7 @@ filter_old_agents(State = #state{last_master_elected = LastMaster,
                                  agent_cache = AgentCache},
                  ElectedTime, Now) ->
   ReregistrationThreshold = minuteman_config:agent_reregistration_threshold(),
-  LastMasterCanKillOldAgents = Now - LastMasterTime > ReregistrationThreshold,
+  LastMasterCanKillOldAgents = Now - LastMasterTime >= ReregistrationThreshold,
   case {ElectedTime == LastMaster, LastMasterCanKillOldAgents} of
     {false, _} ->
       State#state{last_master_elected = ElectedTime,
@@ -222,10 +222,10 @@ filter_old_agents(State = #state{last_master_elected = LastMaster,
     {true, true} ->
       %% This master is old enough to have invalidated any tasks on
       %% slaves that have not yet reconnected.
-      FilterFunc = fun (#agent_cache{last_seen_time = LastSeenTime}) ->
-                       Now - LastSeenTime =< ReregistrationThreshold
+      FilterFunc = fun (_ID, #agent_cache{last_seen_time = LastSeenTime}) ->
+                       Now - LastSeenTime < ReregistrationThreshold
                    end,
-      PrunedCache = map:filter(FilterFunc, AgentCache),
+      PrunedCache = maps:filter(FilterFunc, AgentCache),
       State#state{agent_cache = PrunedCache};
     {true, _} ->
       %% This master is not old enough to trust with agent evictions
@@ -240,7 +240,6 @@ parse_json(Data) ->
   Frameworks = maps:get(frameworks, Parsed),
   {ElectedTime, Agents, Frameworks}.
 
-%% TODO(tyler) test agent_cache
 -spec(parse_json_to_vips(State :: #state{}, Data :: binary(), Now :: integer()) -> #state{}).
 parse_json_to_vips(State, Data, Now) ->
   {ElectedTime, Agents, Frameworks} = parse_json(Data),
@@ -258,14 +257,15 @@ parse_json_to_vips(State, Data, Now) ->
   %% Merge the detected active agents with the cached, possibly-wandering ones.
   CachedAgents = State2#state.agent_cache,
   MergedAgentCache = maps:merge(CachedAgents, ActiveAgents),
+  AgentIPs = get_agent_ips(MergedAgentCache),
+  FoldFun = task_fold_fun(AgentIPs),
+
   State3 = State2#state{agent_cache = MergedAgentCache},
 
   MergedTasks = maps:fold(fun (_Agent, #agent_cache{last_seen_tasks = AgentTasks}, AccIn) ->
                               lists:flatten([AgentTasks | AccIn])
                           end, [], MergedAgentCache),
 
-  AgentIPs = get_agent_ips(MergedAgentCache),
-  FoldFun = task_fold_fun(AgentIPs),
   Vips = lists:foldl(FoldFun, orddict:new(), MergedTasks),
 
   State3#state{vips = Vips}.
@@ -462,14 +462,47 @@ parse_host_port_2(Proto, Host, PortStr) ->
 proper_test() ->
   [] = proper:module(?MODULE).
 
-%% TODO(tyler) prop: keep tasks from last mesos master if it just changed and is empty
-%% TODO(tyler) prop: remove tasks from last mesos master if it changed longer ago than the threshold
-%% TODO(tyler) prop: favor new tasks for an agent over cached agent tasks
-%% TODO(tyler) prop: keep tasks from agents that disappear for less than the threshold
-%% TODO(tyler) prop: remove tasks from agents that disappear for more than the threshold
+%% TODO(tyler) make prop: remove tasks from last mesos master if it changed longer ago than the threshold
+remove_old_agents_after_failover_test() ->
+  {ok, DataEmpty} = file:read_file("testdata/empty.json"),
+  {ok, DataFull} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
+  Now = erlang:monotonic_time(seconds),
+  StateFull = parse_json_to_vips(#state{}, DataFull, Now),
+  StateNewMaster = parse_json_to_vips(StateFull, DataEmpty, Now),
 
-prop_cache_tasks_across_master_failover() ->
-  ok.
+  ReregistrationThreshold = minuteman_config:agent_reregistration_threshold(),
+  Future = Now + ReregistrationThreshold,
+  #state{vips = Vips} = parse_json_to_vips(StateNewMaster, DataEmpty, Future),
+  Expected = [],
+  ?assertEqual(Expected, Vips).
+
+
+%% TODO(tyler) make prop: keep tasks from last mesos master if it just changed and is empty
+cache_old_during_failover_test() ->
+  {ok, DataEmpty} = file:read_file("testdata/empty.json"),
+  {ok, DataFull} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
+  Now = erlang:monotonic_time(seconds),
+  StateFull = parse_json_to_vips(#state{}, DataFull, Now),
+  StateFailover1 = parse_json_to_vips(StateFull, DataEmpty, Now + 60),
+  StateFailover2 = parse_json_to_vips(StateFailover1, DataEmpty, Now + 120),
+  StateFailover3 = parse_json_to_vips(StateFailover2, DataEmpty, Now + 180),
+  #state{vips = Vips} = parse_json_to_vips(StateFailover3, DataEmpty, Now + 240),
+  Expected = [
+    {
+      {tcp, {4, 3, 2, 1}, 1234},
+      [
+        {{33, 33, 33, 1}, 31362},
+        {{33, 33, 33, 1}, 31634}]
+    },
+    {
+      {tcp, {4, 3, 2, 2}, 1234},
+      [
+        {{33, 33, 33, 1}, 31290},
+        {{33, 33, 33, 1}, 31215}
+      ]
+    }
+  ],
+  ?assertEqual(Expected, Vips).
 
 prop_valid_states_parse() ->
   ?FORALL(S, mesos_state(), parses(S)).
