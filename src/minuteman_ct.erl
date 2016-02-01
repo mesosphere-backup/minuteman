@@ -9,6 +9,12 @@
 -module(minuteman_ct).
 -author("sdhillon").
 
+-dialyzer([{nowarn_function, [init/1,
+                              terminate/2,
+                              nfnl_query/2,
+                              try_mapping/2]}
+          ]).
+
 -behaviour(gen_server).
 
 %% API

@@ -11,6 +11,8 @@
 
 -behaviour(gen_server).
 
+-dialyzer([{nowarn_function, [init/1, terminate/2]}]).
+
 %% API
 -export([start_link/0]).
 

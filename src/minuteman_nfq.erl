@@ -9,6 +9,20 @@
 -module(minuteman_nfq).
 -author("sdhillon").
 
+-dialyzer([{nowarn_function, [init/1,
+                              terminate/2,
+                              build_send_cfg_msg/4,
+                              nfnl_query/2,
+                              nfq_unbind_pf/2,
+                              nfq_bind_pf/2,
+                              nfq_create_queue/2,
+                              nfq_set_mode/4,
+                              process_nfq_msgs/2,
+                              process_nfq_msg/2,
+                              process_nfq_packet/2,
+                              accept_packet/2
+                              ]}
+          ]).
 
 -behaviour(gen_server).
 

@@ -9,6 +9,14 @@
 -module(minuteman_routes).
 -author("sdhillon").
 
+-dialyzer([{nowarn_function, [init/1,
+                              terminate/2,
+                              nfnl_query/2,
+                              maybe_update_cache/3,
+                              handle_get_route_real/2,
+                              handle_nfnl_response/1]}
+          ]).
+
 -behaviour(gen_server).
 
 %% API
