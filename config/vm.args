@@ -30,5 +30,7 @@
 ## Increase atom count 4x
 +t 4194304
 
-# This file MUST have extra new lines at the end
+# Scheduler modifications.
+-stbt nnts
 
+# This file MUST have extra new lines at the end
