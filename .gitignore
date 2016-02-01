@@ -11,3 +11,4 @@ app.config
 .eunit/*xml
 .eunit/*erl
 .eunit/*beam
+deps/*
