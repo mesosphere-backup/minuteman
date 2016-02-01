@@ -186,7 +186,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
--spec(poll(State :: #state{}) -> {atom(), #state{}}).
+-spec(poll(State :: #state{}) -> {ok, #state{}} | {error, term()}).
 poll(State) ->
   lager:debug("Starting poll cycle"),
   {ok, _} = timer:send_after(minuteman_config:poll_interval(), poll),
