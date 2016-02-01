@@ -13,7 +13,8 @@
                   jsx,
                   lashup,
                   gen_socket,
-		  gen_netlink,
+                  gen_netlink,
+                  riak_dt,
                   mochiweb,
                   webmachine
                  ]},
