@@ -145,8 +145,8 @@ handle_info(poll, State) ->
     {error, Reason} ->
       lager:warning("Could not poll: ~p", [Reason]),
       State;
-    {ok, NewVips} ->
-      NewVips
+    {ok, RefreshedState} ->
+      RefreshedState
   end,
   {noreply, NewState};
 handle_info(_Info, State) ->
@@ -182,11 +182,14 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-
--spec(poll(State :: #state{}) -> {ok, #state{}} | {error, term()}).
+%%--------------------------------------------------------------------
+%% @doc
+%% Poll the mesos master for current agents and tasks.  We will compare
+%% these tasks against a cache stored in #state{}, which allows us to
+%% retain tasks across master failover before agents reregister.
+%% @end
+%%--------------------------------------------------------------------
+-spec(poll(State :: #state{}) -> {ok, #state{}} | {error, http_error}).
 poll(State) ->
   lager:debug("Starting poll cycle"),
   {ok, _} = timer:send_after(minuteman_config:poll_interval(), poll),
@@ -200,6 +203,11 @@ poll(State) ->
       Other
   end.
 
+
+%%%===================================================================
+%%% Internal functions
+%%%===================================================================
+
 handle_response(State, {ok, {{_HttpVersion, 200, _ReasonPhrase}, _Headers, Body}}) ->
   Now = erlang:monotonic_time(seconds),
   NewState = parse_json_to_vips(State, Body, Now),
@@ -208,6 +216,16 @@ handle_response(_State, Response) ->
   lager:debug("Bad HTTP Response: ~p", [Response]),
   {error, http_error}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% If a master has been seen for longer than the agent reregistration
+%% timeout, we can expect any previously-seen agents to have checked-in.
+%% If they have not, the mesos master will kill its tasks if it
+%% reregisters in the future. Because these tasks are marked-for-death
+%% we can safely remove them from our cache.
+%% @end
+%%--------------------------------------------------------------------
 -spec(filter_old_agents(State :: #state{}, ElectedTime :: float(), Now :: integer()) -> #state{}).
 filter_old_agents(State = #state{last_master_elected = LastMaster,
                                  last_master_elected_local_time = LastMasterTime,
@@ -240,6 +258,13 @@ parse_json(Data) ->
   Frameworks = maps:get(frameworks, Parsed),
   {ElectedTime, Agents, Frameworks}.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Conditionally prune the agent cache and merge it with the previous
+%% results from the mesos master to retrieve the current set of VIPs.
+%% @end
+%%--------------------------------------------------------------------
 -spec(parse_json_to_vips(State :: #state{}, Data :: binary(), Now :: integer()) -> #state{}).
 parse_json_to_vips(State, Data, Now) ->
   {ElectedTime, Agents, Frameworks} = parse_json(Data),
@@ -301,9 +326,14 @@ get_agent_ips(AgentCache) ->
   maps:fold(FoldFun, orddict:new(), AgentCache).
 
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
 %% Wrapper fun to make task_fold into a higher order function
 %% It's a separate function to avoid capturing excessive
 %% local variables
+%% @end
+%%--------------------------------------------------------------------
 task_fold_fun(AgentIPs) ->
   fun (Task, Acc) ->
     try task_fold(AgentIPs, Task, Acc) of
@@ -314,6 +344,12 @@ task_fold_fun(AgentIPs) ->
     end
   end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Get the set of VIP mappings corresponding to a task.
+%% @end
+%%--------------------------------------------------------------------
 -spec task_fold(AgentIPs :: orddict:orddict(), [task()], orddict:orddict()) -> orddict:orddict().
 task_fold(_AgentIPs, _Task = #{statuses := []}, AccIn) ->
   AccIn;
@@ -377,6 +413,12 @@ vip_collect({IP, Port, VIP}, AccIn) ->
 vip_collect(_, AccIn) ->
   AccIn.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Parses labels to pull out a possible VIP mapping.
+%% @end
+%%--------------------------------------------------------------------
 -spec label_to_offset_vip(label()) -> [tuple()].
 label_to_offset_vip(#{key := <<"vip_PORT", PortNum/binary>>, value := VIP}) ->
   case string:to_integer(binary_to_list(PortNum)) of
