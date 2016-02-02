@@ -1,0 +1,34 @@
+#!/bin/bash
+
+function valid_ip()
+{
+    local  ip=$1
+    local  stat=1
+
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        OIFS=$IFS
+        IFS='.'
+        ip=($ip)
+        IFS=$OIFS
+        [[ ${ip[0]} -le 255 && ${ip[1]} -le 255 \
+            && ${ip[2]} -le 255 && ${ip[3]} -le 255 ]]
+        stat=$?
+    fi
+    return $stat
+}
+
+## Try to ascertain the node IP based on some set of heuristics
+IP=127.0.0.1
+if [ -x /opt/mesosphere/bin/detect_ip ]; then
+    IP=$(/opt/mesosphere/bin/detect_ip)
+    if ! valid_ip $IP; then
+        ## 192.88.99.0 was chosen because it's a anycast IP
+        ## used for v6 tunnels
+        IP=$(ip r g 192.88.99.0 | grep -Po 'src \K[\d.]+')
+    fi
+else
+    IP=$(ip r g 192.88.99.0 | grep -Po 'src \K[\d.]+')
+fi
+NAME=minuteman@${IP}
+RELNAME="`dirname \"$0\"`"/minuteman
+NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@
