@@ -235,24 +235,32 @@ socket(Family, Type, Protocol, Opts) ->
 handle_conn(Vips, #ctnetlink{msg = {_Family, _, _, Props}}) ->
   {id, ID} = proplists:lookup(id, Props),
   {status, Status} = proplists:lookup(status, Props),
+  {tuple_orig, Orig} = proplists:lookup(tuple_orig, Props),
   {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
-  Addresses = fmt_net(Reply),
-  maybe_mark_replied(Vips, ID, Addresses, Status).
+  AddressesReply = fmt_net(Reply),
+  AddressesOrig = fmt_net(Orig),
+  maybe_mark_replied(Vips, ID, AddressesReply, AddressesOrig, Status).
 
 
-maybe_mark_replied(Vips, ID, {Proto, DstIP, DstPort, _SrcIP, _SrcPort} = Addresses, Status) ->
+maybe_mark_replied(Vips, ID,
+                   {Proto, DstIP, DstPort, _SrcIP, _SrcPort} = AddressesReply,
+                   {_RProto, _RDstIP, _RDstPort, _RSrcIP, _RSrcPort} = AddressesOrig,
+                   Status) ->
   case sets:is_element({Proto, DstIP, DstPort}, Vips) of
     true ->
-      mark_replied(ID, Addresses, Status);
+      mark_replied(ID, AddressesReply, AddressesOrig, Status);
     _ ->
       ok
   end;
 
-maybe_mark_replied(_, _, _, _) ->
+maybe_mark_replied(_, _, _, _, _) ->
   %% unsupported proto (udp, icmp, sctp...)
   ok.
 
-mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
+mark_replied(ID,
+             {_Proto, DstIP, DstPort, _SrcIP, _SrcPort},
+             {_VIPProto, _RDstIP, _RDstPort, VIP, VIPPort},
+             Status) ->
   case lists:member(seen_reply, Status) of
     true ->
       lager:debug("marking backend ~p:~p available", [DstIP, DstPort]),
@@ -261,6 +269,12 @@ mark_replied(ID, {_Proto, DstIP, DstPort, _SrcIP, _SrcPort}, Status) ->
           TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
           timer:cancel(TimerID),
           Success = true,
+
+          Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(DstIP, DstPort)},
+          AggTags = [[hostname], [hostname, backend]],
+          telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
+          telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta),
+
           minuteman_metrics:update([successes], 1, counter),
           minuteman_metrics:update([connect_latency], TimeDelta, histogram),
           minuteman_metrics:update([connect_latency, backend, {DstIP, DstPort}], TimeDelta, histogram),
@@ -303,3 +317,9 @@ fmt_net(Props) ->
     _ ->
       {error, unsupported_proto}
   end.
+
+
+fmt_ip_port(IP, Port) ->
+  IPString = inet_parse:ntoa(IP),
+  List = io_lib:format("~s:~p", [IPString, Port]),
+  list_to_binary(List).
