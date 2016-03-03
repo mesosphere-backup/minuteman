@@ -159,12 +159,17 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_info({check_conn_connected, {ID, IP, Port}}, State) ->
+handle_info({check_conn_connected, {ID, IP, Port, VIP, VIPPort}}, State) ->
   case ets:take(connection_timers, ID) of
     [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
       TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
       timer:cancel(TimerID),
       Success = false,
+
+      Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port)},
+      AggTags = [[hostname], [hostname, backend]],
+      telemetry:counter(mm_connect_failures, Tags, AggTags, 1),
+
       minuteman_metrics:update([timeouts], 1, counter),
       minuteman_ewma:observe(TimeDelta,
                              {IP, Port},
@@ -292,7 +297,7 @@ mark_replied(ID,
       % Set up a timer and schedule a connection check at the
       % configured threshold.
       {ok, TimerID} = timer:send_after(minuteman_config:tcp_connect_threshold(),
-                                       {check_conn_connected, {ID, DstIP, DstPort}}),
+                                       {check_conn_connected, {ID, DstIP, DstPort, VIP, VIPPort}}),
       ets:insert(connection_timers, #ct_timer{id = ID,
                                               timer_id = TimerID,
                                               start_time = erlang:monotonic_time(nano_seconds)})
@@ -321,5 +326,5 @@ fmt_net(Props) ->
 
 fmt_ip_port(IP, Port) ->
   IPString = inet_parse:ntoa(IP),
-  List = io_lib:format("~s:~p", [IPString, Port]),
+  List = io_lib:format("~s_~p", [IPString, Port]),
   list_to_binary(List).
