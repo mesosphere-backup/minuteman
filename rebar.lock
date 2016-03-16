@@ -83,7 +83,7 @@
        {ref,"de3c42df5845719d3a3529b76a01f9729821fe7a"}},
   0},
  {<<"telemetry">>,
-  {git,"git://github.com/mesosphere/telemetry.git",
+  {git,"git://github.com/mesosphere/telemetry-net.git",
        {ref,"9d2f3a35265cf689b0d97cca2e911ea8b93097f4"}},
   0},
  {<<"webmachine">>,
