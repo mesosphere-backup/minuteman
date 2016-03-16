@@ -273,16 +273,10 @@ mark_replied(ID,
         [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
           TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
           timer:cancel(TimerID),
+
+          record_replied_metrics(VIP, VIPPort, DstIP, DstPort, TimeDelta),
+
           Success = true,
-
-          Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(DstIP, DstPort)},
-          AggTags = [[hostname], [hostname, backend]],
-          telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
-          telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta),
-
-          minuteman_metrics:update([successes], 1, counter),
-          minuteman_metrics:update([connect_latency], TimeDelta, histogram),
-          minuteman_metrics:update([connect_latency, backend, {DstIP, DstPort}], TimeDelta, histogram),
           minuteman_ewma:observe(TimeDelta,
                                  {DstIP, DstPort},
                                  Success);
@@ -303,6 +297,15 @@ mark_replied(ID,
                                               start_time = erlang:monotonic_time(nano_seconds)})
   end.
 
+record_replied_metrics(VIP, VIPPort, DstIP, DstPort, TimeDelta) ->
+  Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(DstIP, DstPort)},
+  AggTags = [[hostname], [hostname, backend]],
+  telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
+  telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta),
+
+  minuteman_metrics:update([successes], 1, counter),
+  minuteman_metrics:update([connect_latency], TimeDelta, histogram),
+  minuteman_metrics:update([connect_latency, backend, {DstIP, DstPort}], TimeDelta, histogram).
 
 fmt_net(Props) ->
   {ip, IPProps} = proplists:lookup(ip, Props),
