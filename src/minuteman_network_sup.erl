@@ -80,7 +80,7 @@ load_rule({Table, Chain, Rule, Args}) ->
         {ok, []} ->
           ok;
         Else ->
-          lager:debug("Unknown response: ~p", [Else]),
+          lager:error("Unknown response: ~p", [Else]),
           erlang:error(iptables_fail)
       end
   end.
