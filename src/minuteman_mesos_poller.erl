@@ -353,7 +353,32 @@ task_fold_fun(AgentIPs) ->
 -spec task_fold(AgentIPs :: orddict:orddict(), [task()], orddict:orddict()) -> orddict:orddict().
 task_fold(_AgentIPs, _Task = #{statuses := []}, AccIn) ->
   AccIn;
-task_fold(AgentIPs, _Task = #{
+task_fold(AgentIPs, Task, AccIn) ->
+  Acc1 = task_fold_discovery(AgentIPs, Task, AccIn),
+  task_fold_labels(AgentIPs, Task, Acc1).
+
+
+task_fold_discovery(AgentIPs, _Task = #{
+  container := #{docker := #{network := <<"BRIDGE">>}},
+  slave_id := SlaveID,
+  discovery := Discovery,
+  statuses := Statuses,
+  state := <<"TASK_RUNNING">>}, AccIn) ->
+  %% we only care about the most recent status, which will be the last in the list
+  [Status|_] = lists:reverse(Statuses),
+  IPs = orddict:fetch(SlaveID, AgentIPs),
+  vip_discovery(IPs, Status, Discovery, AccIn);
+task_fold_discovery(_AgentIPs, _Task = #{
+  discovery := Discovery,
+  statuses := Statuses,
+  state := <<"TASK_RUNNING">>}, AccIn) ->
+  [Status|_] = lists:reverse(Statuses),
+  IPs = status_to_ips(Status),
+  vip_discovery(IPs, Status, Discovery, AccIn);
+task_fold_discovery(_AgentIPs, _Task, AccIn) ->
+  AccIn.
+
+task_fold_labels(AgentIPs, _Task = #{
             container := #{docker := #{network := <<"BRIDGE">>}},
             slave_id := SlaveID,
             labels := Labels,
@@ -365,7 +390,7 @@ task_fold(AgentIPs, _Task = #{
   IPs = orddict:fetch(SlaveID, AgentIPs),
   vip_permutations(IPs, Status, Ports, Labels, AccIn);
 
-task_fold(_AgentIPs, _Task = #{
+task_fold_labels(_AgentIPs, _Task = #{
             labels := Labels,
             resources  := #{ports := Ports},
             statuses := Statuses,
@@ -375,7 +400,7 @@ task_fold(_AgentIPs, _Task = #{
   IPs = status_to_ips(Status),
   vip_permutations(IPs, Status, Ports, Labels, AccIn);
 
-task_fold(_AgentIPs, _Task, AccIn) ->
+task_fold_labels(_AgentIPs, _Task, AccIn) ->
   AccIn.
 
 -spec vip_permutations([inet:ip4_address()], task_status(), [binary()], [binary()], orddict:orddict())
@@ -412,6 +437,49 @@ vip_collect({IP, Port, VIP}, AccIn) ->
   end;
 vip_collect(_, AccIn) ->
   AccIn.
+
+vip_discovery(_IPs, _Status = #{healthy := false}, _Discovery, AccIn) ->
+  AccIn;
+vip_discovery(IPs, Status, _Discovery = #{ports := #{ports := Ports}}, AccIn) ->
+  vip_ports(IPs, Status, Ports, AccIn).
+
+
+vip_ports(_IPs, _Status, _Ports = [], AccIn) ->
+  AccIn;
+vip_ports(IPs, Status, _Ports = [Port = #{labels := #{labels := Labels}}|RestPorts], AccIn) ->
+  Acc2 = vip_labels(IPs, Status, Port, Labels, AccIn),
+  vip_ports(IPs, Status, RestPorts, Acc2);
+vip_ports(IPs, Status, _Ports = [_Port|RestPorts], AccIn) ->
+  vip_ports(IPs, Status, RestPorts, AccIn).
+
+
+vip_labels(_IPs, _Status, _Port, _Labels = [], AccIn) ->
+  AccIn;
+vip_labels(IPs, Status, Port, [#{key := <<"vip", _/binary>>, value := Value}|RestLabels], AccIn) ->
+  Acc2 = permute_label(IPs, Port, Value, AccIn),
+  vip_labels(IPs, Status, Port, RestLabels, Acc2);
+vip_labels(IPs, Status, Port, [#{key := <<"VIP", _/binary>>, value := Value}|RestLabels], AccIn) ->
+  Acc2 = permute_label(IPs, Port, Value, AccIn),
+  vip_labels(IPs, Status, Port, RestLabels, Acc2);
+vip_labels(IPs, Status, Port, [_Label|RestLabels], AccIn) ->
+  vip_labels(IPs, Status, Port, RestLabels, AccIn).
+
+permute_label(IPs, _Port = #{protocol := ProtocolBin, number := PortNumber}, BinVIP, Acc) ->
+  VIP = parse_vip(ProtocolBin, BinVIP),
+  Backends = [{IP, PortNumber} || IP <- IPs],
+  orddict:append_list(VIP, Backends, Acc).
+
+parse_protocol(<<"tcp">>) ->
+  tcp.
+
+parse_vip(ProtocolBin, BinaryVIP) ->
+  Protocol = parse_protocol(ProtocolBin),
+  StrVIP = binary_to_list(BinaryVIP),
+  [StrIP, StrPort] = string:tokens(StrVIP, ":"),
+  {ok, IP} = inet:parse_ipv4_address(StrIP),
+  {Port, ""} = string:to_integer(StrPort),
+  {Protocol, IP, Port}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -735,6 +803,36 @@ docker_basic_test() ->
     }
   ],
   ?assertEqual(Expected, Vips).
+
+di_state_test() ->
+  {ok, Data} = file:read_file("testdata/state_di.json"),
+  Now = erlang:monotonic_time(seconds),
+  #state{vips = Vips} = parse_json_to_vips(#state{}, Data, Now),
+  Expected = [
+    {
+      {tcp, {1, 2, 3, 4}, 8080},
+      [
+        {{10, 0, 2, 234}, 19426}
+      ]
+    }
+  ],
+  ?assertEqual(Expected, Vips).
+
+
+state2_test() ->
+  {ok, Data} = file:read_file("testdata/state2.json"),
+  Now = erlang:monotonic_time(seconds),
+  #state{vips = Vips} = parse_json_to_vips(#state{}, Data, Now),
+  Expected = [
+    {
+      {tcp, {1, 2, 3, 4}, 5000},
+      [
+        {{10, 10, 0, 109}, 8014}
+      ]
+    }
+  ],
+  ?assertEqual(Expected, Vips).
+
 
 bad_state_test() ->
   {ok, Data} = file:read_file("testdata/bad-state-gaal.json"),

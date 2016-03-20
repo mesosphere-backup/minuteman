@@ -1,0 +1,395 @@
+{
+  "version": "0.27.1",
+  "git_sha": "8642ac5a959a1870b7c5904802ff11a85e2af5bb",
+  "build_date": "2016-03-16 01:55:52",
+  "build_time": 1458093352,
+  "build_user": "",
+  "start_time": 1458245751.53675,
+  "elected_time": 1458245751.59306,
+  "id": "b2d07a6a-4012-4a7f-8635-224d04de674e",
+  "pid": "master@10.0.5.163:5050",
+  "hostname": "10.0.5.163",
+  "activated_slaves": 3,
+  "deactivated_slaves": 0,
+  "cluster": "sargun-mgpx0ld",
+  "leader": "master@10.0.5.163:5050",
+  "log_dir": "/var/log/mesos",
+  "flags": {
+    "allocation_interval": "1secs",
+    "allocator": "HierarchicalDRF",
+    "authenticate": "false",
+    "authenticate_http": "false",
+    "authenticate_slaves": "false",
+    "authenticators": "crammd5",
+    "authorizers": "local",
+    "cluster": "sargun-mgpx0ld",
+    "framework_sorter": "drf",
+    "help": "false",
+    "hostname_lookup": "false",
+    "http_authenticators": "basic",
+    "initialize_driver_logging": "true",
+    "ip_discovery_command": "/opt/mesosphere/bin/detect_ip",
+    "log_auto_initialize": "true",
+    "log_dir": "/var/log/mesos",
+    "logbufsecs": "0",
+    "logging_level": "INFO",
+    "max_completed_frameworks": "50",
+    "max_completed_tasks_per_framework": "1000",
+    "max_slave_ping_timeouts": "20",
+    "offer_timeout": "2mins",
+    "port": "5050",
+    "quiet": "false",
+    "quorum": "1",
+    "recovery_slave_removal_limit": "100%",
+    "registry": "replicated_log",
+    "registry_fetch_timeout": "1mins",
+    "registry_store_timeout": "1mins",
+    "registry_strict": "false",
+    "root_submissions": "true",
+    "slave_ping_timeout": "15secs",
+    "slave_removal_rate_limit": "1/20mins",
+    "slave_reregister_timeout": "10mins",
+    "user_sorter": "drf",
+    "version": "false",
+    "webui_dir": "/opt/mesosphere/packages/mesos--f06f3d5e3584cb6cab9348fedd660b549cf43d25/share/mesos/webui",
+    "weights": "",
+    "work_dir": "/var/lib/mesos/master",
+    "zk": "zk://127.0.0.1:2181/mesos",
+    "zk_session_timeout": "10secs"
+  },
+  "slaves": [
+    {
+      "id": "b2d07a6a-4012-4a7f-8635-224d04de674e-S2",
+      "pid": "slave(1)@10.0.5.163:5051",
+      "hostname": "10.0.5.163",
+      "registered_time": 1458245798.4404,
+      "resources": {
+        "cpus": 4,
+        "disk": 32541,
+        "mem": 14019,
+        "ports": "[5000-6000]"
+      },
+      "used_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "offered_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "reserved_resources": {
+        "agent_master": {
+          "cpus": 4,
+          "disk": 32541,
+          "mem": 14019,
+          "ports": "[5000-6000]"
+        }
+      },
+      "unreserved_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "attributes": {},
+      "active": true,
+      "version": "0.27.1",
+      "reserved_resources_full": {
+        "agent_master": [
+          {
+            "name": "ports",
+            "type": "RANGES",
+            "ranges": {
+              "range": [
+                {
+                  "begin": 5000,
+                  "end": 6000
+                }
+              ]
+            },
+            "role": "agent_master"
+          },
+          {
+            "name": "cpus",
+            "type": "SCALAR",
+            "scalar": {
+              "value": 4
+            },
+            "role": "agent_master"
+          },
+          {
+            "name": "mem",
+            "type": "SCALAR",
+            "scalar": {
+              "value": 14019
+            },
+            "role": "agent_master"
+          },
+          {
+            "name": "disk",
+            "type": "SCALAR",
+            "scalar": {
+              "value": 32541
+            },
+            "role": "agent_master"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b2d07a6a-4012-4a7f-8635-224d04de674e-S1",
+      "pid": "slave(1)@10.0.4.192:5051",
+      "hostname": "10.0.4.192",
+      "registered_time": 1458245793.53794,
+      "resources": {
+        "cpus": 4,
+        "disk": 32541,
+        "mem": 14019,
+        "ports": "[1-21, 23-5050, 5052-32000]"
+      },
+      "used_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "offered_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "reserved_resources": {
+        "slave_public": {
+          "cpus": 4,
+          "disk": 32541,
+          "mem": 14019,
+          "ports": "[1-21, 23-5050, 5052-32000]"
+        }
+      },
+      "unreserved_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "attributes": {
+        "public_ip": "true"
+      },
+      "active": true,
+      "version": "0.27.1",
+      "reserved_resources_full": {
+        "slave_public": [
+          {
+            "name": "ports",
+            "type": "RANGES",
+            "ranges": {
+              "range": [
+                {
+                  "begin": 1,
+                  "end": 21
+                },
+                {
+                  "begin": 23,
+                  "end": 5050
+                },
+                {
+                  "begin": 5052,
+                  "end": 32000
+                }
+              ]
+            },
+            "role": "slave_public"
+          },
+          {
+            "name": "cpus",
+            "type": "SCALAR",
+            "scalar": {
+              "value": 4
+            },
+            "role": "slave_public"
+          },
+          {
+            "name": "mem",
+            "type": "SCALAR",
+            "scalar": {
+              "value": 14019
+            },
+            "role": "slave_public"
+          },
+          {
+            "name": "disk",
+            "type": "SCALAR",
+            "scalar": {
+              "value": 32541
+            },
+            "role": "slave_public"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b2d07a6a-4012-4a7f-8635-224d04de674e-S0",
+      "pid": "slave(1)@10.0.2.234:5051",
+      "hostname": "10.0.2.234",
+      "registered_time": 1458245789.61336,
+      "resources": {
+        "cpus": 4,
+        "disk": 32541,
+        "mem": 14019,
+        "ports": "[1025-2180, 2182-3887, 3889-5049, 5052-8079, 8082-8180, 8182-32000]"
+      },
+      "used_resources": {
+        "cpus": 1,
+        "disk": 0,
+        "mem": 128,
+        "ports": "[19426-19426]"
+      },
+      "offered_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "reserved_resources": {},
+      "unreserved_resources": {
+        "cpus": 4,
+        "disk": 32541,
+        "mem": 14019,
+        "ports": "[1025-2180, 2182-3887, 3889-5049, 5052-8079, 8082-8180, 8182-32000]"
+      },
+      "attributes": {},
+      "active": true,
+      "version": "0.27.1",
+      "reserved_resources_full": {}
+    }
+  ],
+  "frameworks": [
+    {
+      "id": "b2d07a6a-4012-4a7f-8635-224d04de674e-0001",
+      "name": "marathon",
+      "pid": "scheduler-29634d79-07d1-4f42-b9fe-1aa9586526b4@10.0.5.163:43078",
+      "used_resources": {
+        "cpus": 1,
+        "disk": 0,
+        "mem": 128,
+        "ports": "[19426-19426]"
+      },
+      "offered_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "capabilities": [],
+      "hostname": "10.0.5.163",
+      "webui_url": "http://10.0.5.163:8124",
+      "active": true,
+      "user": "root",
+      "failover_timeout": 604800,
+      "checkpoint": true,
+      "role": "*",
+      "registered_time": 1458246581.91063,
+      "unregistered_time": 0,
+      "resources": {
+        "cpus": 1,
+        "disk": 0,
+        "mem": 128,
+        "ports": "[19426-19426]"
+      },
+      "reregistered_time": 1458246767.44212,
+      "tasks": [
+        {
+          "id": "sleep.bf108244-ec7f-11e5-b98e-82ce0fb60967",
+          "name": "sleep",
+          "framework_id": "b2d07a6a-4012-4a7f-8635-224d04de674e-0001",
+          "executor_id": "",
+          "slave_id": "b2d07a6a-4012-4a7f-8635-224d04de674e-S0",
+          "state": "TASK_RUNNING",
+          "resources": {
+            "cpus": 1,
+            "disk": 0,
+            "mem": 128,
+            "ports": "[19426-19426]"
+          },
+          "statuses": [
+            {
+              "state": "TASK_RUNNING",
+              "timestamp": 1458246911.72168,
+              "container_status": {
+                "network_infos": [
+                  {
+                    "ip_address": "10.0.2.234",
+                    "ip_addresses": [
+                      {
+                        "ip_address": "10.0.2.234"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "discovery": {
+            "visibility": "FRAMEWORK",
+            "name": "sleep",
+            "ports": {
+              "ports": [
+                {
+                  "number": 19426,
+                  "name": "myport",
+                  "protocol": "tcp",
+                  "labels": {
+                    "labels": [
+                      {
+                        "key": "VIP_0",
+                        "value": "1.2.3.4:8080"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "completed_tasks": [],
+      "offers": [],
+      "executors": []
+    },
+    {
+      "id": "b2d07a6a-4012-4a7f-8635-224d04de674e-0000",
+      "name": "marathon",
+      "pid": "scheduler-2d6a72be-209d-43ba-b611-016c0df8cc5a@10.0.5.163:55803",
+      "used_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "offered_resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "capabilities": [],
+      "hostname": "10.0.5.163",
+      "webui_url": "http://10.0.5.163:8080",
+      "active": true,
+      "user": "root",
+      "failover_timeout": 604800,
+      "checkpoint": true,
+      "role": "slave_public",
+      "registered_time": 1458245758.48717,
+      "unregistered_time": 0,
+      "resources": {
+        "cpus": 0,
+        "disk": 0,
+        "mem": 0
+      },
+      "reregistered_time": 1458245770.4818,
+      "tasks": [],
+      "completed_tasks": [],
+      "offers": [],
+      "executors": []
+    }
+  ],
+  "completed_frameworks": [],
+  "orphan_tasks": [],
+  "unregistered_frameworks": []
+}
