@@ -243,16 +243,16 @@ handle_conn(Vips, #ctnetlink{msg = {_Family, _, _, Props}}) ->
   {tuple_orig, Orig} = proplists:lookup(tuple_orig, Props),
   {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
   AddressesReply = fmt_net(Reply),
-  AddressesOrig = fmt_net(Orig),
-  maybe_mark_replied(Vips, ID, AddressesReply, AddressesOrig, Status).
+  maybe_mark_replied(Vips, ID, AddressesReply, Orig, Status).
 
 
 maybe_mark_replied(Vips, ID,
                    {Proto, DstIP, DstPort, _SrcIP, _SrcPort} = AddressesReply,
-                   {_RProto, _RDstIP, _RDstPort, _RSrcIP, _RSrcPort} = AddressesOrig,
+                   Orig,
                    Status) ->
   case sets:is_element({Proto, DstIP, DstPort}, Vips) of
     true ->
+      AddressesOrig = fmt_net(Orig),
       mark_replied(ID, AddressesReply, AddressesOrig, Status);
     _ ->
       ok

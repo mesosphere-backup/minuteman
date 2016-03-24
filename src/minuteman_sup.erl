@@ -52,5 +52,5 @@ get_children() ->
     Children2.
 
 init([]) ->
-    {ok, { {one_for_one, 5, 10}, get_children()} }.
+    {ok, { {one_for_one, 100000, 1}, get_children()} }.
 
