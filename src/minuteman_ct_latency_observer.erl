@@ -252,8 +252,13 @@ maybe_mark_replied(Vips, ID,
                    Status) ->
   case sets:is_element({Proto, DstIP, DstPort}, Vips) of
     true ->
-      AddressesOrig = fmt_net(Orig),
-      mark_replied(ID, AddressesReply, AddressesOrig, Status);
+      {VIPProto, _, _, VIP, VIPPort} = AddressesOrig = fmt_net(Orig),
+      case sets:is_element({VIPProto, VIP, VIPPort}, Vips) of
+        true ->
+          mark_replied(ID, AddressesReply, AddressesOrig, Status);
+        _ ->
+          ok
+      end;
     _ ->
       ok
   end;
