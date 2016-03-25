@@ -47,7 +47,11 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {socket = erlang:error() :: gen_socket:socket(), vips = sets:new()}).
+-record(state, {
+  socket = erlang:error() :: gen_socket:socket(),
+  vips = sets:new(),
+  backends = sets:new()
+  }).
 
 -record(ct_timer, {
   id :: integer(),
@@ -64,8 +68,10 @@ push_vips(Vips) ->
     BackendsSet = sets:from_list(BackendsList),
     sets:union(BackendsSet, Acc)
   end,
-  Set = orddict:fold(FoldFun, sets:new(), Vips),
-  gen_server:cast(?SERVER, {push_vips, Set}).
+  Backends = orddict:fold(FoldFun, sets:new(), Vips),
+  VIPList = proplists:get_keys(Vips),
+  VIPSet = sets:from_list(VIPList),
+  gen_server:cast(?SERVER, {push_vips, {VIPSet, Backends}}).
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -139,8 +145,8 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_cast({push_vips, FrontendsSet}, State) ->
-  State1 = State#state{vips = FrontendsSet},
+handle_cast({push_vips, {VIPSet, BackendSet}}, State) ->
+  State1 = State#state{vips = VIPSet, backends = BackendSet},
   {noreply, State1};
 handle_cast(_Request, State) ->
   {noreply, State}.
@@ -179,8 +185,8 @@ handle_info({check_conn_connected, {ID, IP, Port, VIP, VIPPort}}, State) ->
       ok
   end,
   {noreply, State};
-handle_info({Socket, input_ready}, State = #state{socket = Socket, vips = Vips}) ->
-  HandleFun = fun(X) -> handle_conn(Vips, X) end,
+handle_info({Socket, input_ready}, State = #state{socket = Socket, vips = Vips, backends = Backends}) ->
+  HandleFun = fun(X) -> handle_conn(Vips, Backends, X) end,
   case gen_socket:recv(Socket, 8192) of
     {ok, Data} ->
       Msg = netlink:nl_ct_dec(Data),
@@ -237,20 +243,20 @@ socket(Family, Type, Protocol, Opts) ->
       gen_socket:socketat(NetNs, Family, Type, Protocol)
   end.
 
-handle_conn(Vips, #ctnetlink{msg = {_Family, _, _, Props}}) ->
+handle_conn(Vips, Backends, #ctnetlink{msg = {_Family, _, _, Props}}) ->
   {id, ID} = proplists:lookup(id, Props),
   {status, Status} = proplists:lookup(status, Props),
   {tuple_orig, Orig} = proplists:lookup(tuple_orig, Props),
   {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
   AddressesReply = fmt_net(Reply),
-  maybe_mark_replied(Vips, ID, AddressesReply, Orig, Status).
+  maybe_mark_replied(Vips, Backends, ID, AddressesReply, Orig, Status).
 
 
-maybe_mark_replied(Vips, ID,
+maybe_mark_replied(Vips, Backends, ID,
                    {Proto, DstIP, DstPort, _SrcIP, _SrcPort} = AddressesReply,
                    Orig,
                    Status) ->
-  case sets:is_element({Proto, DstIP, DstPort}, Vips) of
+  case sets:is_element({Proto, DstIP, DstPort}, Backends) of
     true ->
       {VIPProto, _, _, VIP, VIPPort} = AddressesOrig = fmt_net(Orig),
       case sets:is_element({VIPProto, VIP, VIPPort}, Vips) of
@@ -263,7 +269,7 @@ maybe_mark_replied(Vips, ID,
       ok
   end;
 
-maybe_mark_replied(_, _, _, _, _) ->
+maybe_mark_replied(_, _, _, _, _, _) ->
   %% unsupported proto (udp, icmp, sctp...)
   ok.
 
