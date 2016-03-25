@@ -69,7 +69,7 @@ push_vips(Vips) ->
     sets:union(BackendsSet, Acc)
   end,
   Backends = orddict:fold(FoldFun, sets:new(), Vips),
-  VIPList = proplists:get_keys(Vips),
+  VIPList = orddict:fetch_keys(Vips),
   VIPSet = sets:from_list(VIPList),
   gen_server:cast(?SERVER, {push_vips, {VIPSet, Backends}}).
 %%--------------------------------------------------------------------
