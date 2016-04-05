@@ -84,7 +84,7 @@
   0},
  {<<"telemetry">>,
   {git,"git@github.com:mesosphere/telemetry-net.git",
-       {ref,"175c6310f05ebd8629067a649c98a64246ce0d18"}},
+       {ref,"805b8612e9eac368c09d2e0562f7507206efa004"}},
   0},
  {<<"webmachine">>,
   {git,"git://github.com/basho/webmachine",
