@@ -310,7 +310,7 @@ mark_replied(ID,
 
 record_replied_metrics(VIP, VIPPort, DstIP, DstPort, TimeDelta) ->
   Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(DstIP, DstPort)},
-  AggTags = [[hostname, vip], [hostname, backend]],
+  AggTags = [[hostname], [hostname, backend]],
   telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
   telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta),
 
