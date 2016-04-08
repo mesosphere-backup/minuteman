@@ -173,7 +173,7 @@ handle_info({check_conn_connected, {ID, IP, Port, VIP, VIPPort}}, State) ->
       Success = false,
 
       Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port)},
-      AggTags = [[hostname, vip], [hostname, backend]],
+      AggTags = [[hostname], [hostname, backend]],
       telemetry:counter(mm_connect_failures, Tags, AggTags, 1),
 
       minuteman_metrics:update([timeouts], 1, counter),
