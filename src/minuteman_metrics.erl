@@ -11,7 +11,7 @@
 -author("Sargun Dhillon").
 
 
--export([update/3, setup/0, lashup/1]).
+-export([update/3, setup/0, lashup/1, inspect_backend/1]).
 
 -ifdef(TEST).
 update(_Metric, _Value, _Type) ->
@@ -26,6 +26,21 @@ update(Metric, Value, Type) ->
   end.
 -endif.
 
+inspect_backend(Backend) ->
+  #{
+    successes_one => get_value([backend, Backend, successes], one),
+    failures_one => get_value([backend, Backend, failures], one),
+    p99 => get_value([backend, Backend, connect_latency], p99)
+  }.
+
+get_value(Metric, Key) ->
+  value_or_undefined(exometer:get_value(Metric, Key)).
+value_or_undefined({ok, [{_Key, Value}]}) ->
+  Value;
+value_or_undefined({ok, Value}) ->
+    Value;
+value_or_undefined({error, not_found}) ->
+    undefined.
 
 setup() ->
   exometer:ensure([erlang, system_info],
