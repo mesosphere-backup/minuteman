@@ -11,6 +11,8 @@
 
 -behaviour(gen_server).
 
+-dialyzer([{nowarn_function, [notify_metrics/2]}]).
+
 %% API
 -export([start_link/0,
   observe/3,
@@ -181,6 +183,7 @@ handle_cast({observe, {Measurement, {IP, Port}, Success}}, State) ->
 
   Tracking = Backend#backend.tracking,
   NewTracking = track_success(Success, Tracking),
+  notify_metrics(Success, {IP, Port}),
 
   NewBackend = Backend#backend{ewma = NewEwma,
     tracking = NewTracking},
@@ -552,6 +555,14 @@ get_ewma_or_default({IP, Port}) ->
 
 now() ->
   erlang:monotonic_time(nano_seconds).
+
+notify_metrics(true, {IP, Port}) ->
+  minuteman_metrics:update([backend, {IP, Port}, successes], 1, spiral);
+notify_metrics(false, {IP, Port}) ->
+  minuteman_metrics:update([backend, {IP, Port}, failures], 1, spiral);
+notify_metrics(_, _Backend) ->
+  ok.
+
 
 -ifdef(TEST).
 

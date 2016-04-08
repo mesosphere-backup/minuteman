@@ -316,7 +316,7 @@ record_replied_metrics(VIP, VIPPort, DstIP, DstPort, TimeDelta) ->
 
   minuteman_metrics:update([successes], 1, counter),
   minuteman_metrics:update([connect_latency], TimeDelta, histogram),
-  minuteman_metrics:update([connect_latency, backend, {DstIP, DstPort}], TimeDelta, histogram).
+  minuteman_metrics:update([backend, {DstIP, DstPort}, connect_latency], TimeDelta, histogram).
 
 fmt_net(Props) ->
   {ip, IPProps} = proplists:lookup(ip, Props),

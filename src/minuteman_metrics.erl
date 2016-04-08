@@ -20,7 +20,7 @@ update(_Metric, _Value, _Type) ->
 update(Metric, Value, Type) ->
   case exometer:update(Metric, Value) of
     {error, not_found} ->
-      ok = exometer:ensure(Metric, Type, []),
+      ok = exometer:ensure(Metric, Type, [{cache, 15}]),
       ok = exometer:update(Metric, Value);
     _ -> ok
   end.
