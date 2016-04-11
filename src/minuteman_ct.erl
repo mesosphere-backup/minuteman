@@ -279,7 +279,7 @@ build_ctnetlink_msg_create(Mapping) ->
       [{v4_dst, Mapping#mapping.new_dst_ip},
         {dst_port, [{min_port, Mapping#mapping.new_dst_port}, {max_port, Mapping#mapping.new_dst_port}]}]}
   ]},
-  Msg = [#ctnetlink{type = new, flags = [create, request, ack], seq = Seq, pid = 0, msg = Cmd}],
+  Msg = [#ctnetlink{type = new, flags = [create, request, ack, excl], seq = Seq, pid = 0, msg = Cmd}],
   Msg.
 
 tuple_orig(Mapping) ->
