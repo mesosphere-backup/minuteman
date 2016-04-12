@@ -40,6 +40,7 @@ add_default_children(Children) ->
         ?CHILD(minuteman_vip_events, worker),
         ?CHILD(minuteman_ipsets, worker),
         ?CHILD(minuteman_vip_server, worker),
+        ?CHILD(minuteman_metric_cleaner, worker),
         ?CHILD(minuteman_mesos_poller, worker),
         ?CHILD(minuteman_lashup_publish, worker),
         ?CHILD(minuteman_lashup_index, worker)|
