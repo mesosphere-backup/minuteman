@@ -49,6 +49,12 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {}).
+-record(reachability_cache, {
+  cache = orddict:new() :: orddict:orddict(inet:ip4_address(), boolean()),
+  tree = false :: false | lashup_gm_route:tree()
+}).
+-type reachability_cache() :: #reachability_cache{}.
+
 %% How many lookups we do to populate the backends list in Minuteman
 -define(LOOKUP_LIMIT, 20).
 
@@ -341,7 +347,7 @@ decrement_pending(_, Ewma) ->
 pick_backend_internal(BackendAddrs) when length(BackendAddrs) > ?BACKEND_LIMIT ->
   minuteman_metrics:update([probabilistic_backend_picker], 1, spiral),
   Now = erlang:monotonic_time(),
-  ReachabilityCache = dict:new(),
+  ReachabilityCache = reachability_cache(),
   Choice = probabilistic_backend_chooser(Now, ReachabilityCache, BackendAddrs, [], [], []),
   {ok, Choice};
 
@@ -363,10 +369,11 @@ pick_backend_internal(BackendAddrs) ->
               _ ->
                 Up
             end,
+  Tree = tree(),
   {ReachableTrue, ReachableFalse} = lists:partition(
     fun(Backend) ->
       {IP, _Port} = Backend#backend.ip_port,
-      is_reachable_real(IP)
+      is_reachable_real(IP, Tree)
     end,
     Choices),
 
@@ -407,7 +414,7 @@ pop_item_from_list(List) ->
 
 
 -spec(probabilistic_backend_chooser(Now :: integer(),
-  ReachabilityCache :: dict:dict(),
+  ReachabilityCache :: reachability_cache(),
   RemainingBackendAddrs :: backends(),
   ReachableAndOpenBackends :: backends(),
   OpenBackends :: backends(),
@@ -503,25 +510,37 @@ choose_backend_by_cost(A, B) ->
     false -> B
   end.
 
+-spec(reachability_cache() -> reachability_cache()).
+reachability_cache() ->
+  #reachability_cache{tree = tree()}.
 
-is_reachable(ReachabilityCache, IP) ->
-  case dict:find(IP, ReachabilityCache) of
+-spec(tree() -> lashup_gm_route:tree() | false).
+tree() ->
+  try lashup_gm_route:get_tree(node()) of
+    {tree, Tree} -> Tree;
+    false -> false
+  catch
+    _ -> false
+  end.
+
+
+is_reachable(ReachabilityCache = #reachability_cache{cache = Cache, tree = Tree}, IP) ->
+  case orddict:find(IP, Cache) of
     {ok, Value} ->
       {ReachabilityCache, Value};
     _ ->
-      Reachable = is_reachable_real(IP),
-      ReachabilityCache1 = dict:store(IP, Reachable, ReachabilityCache),
+      Reachable = is_reachable_real(IP, Tree),
+      ReachabilityCache1 = ReachabilityCache#reachability_cache{cache = orddict:store(IP, Reachable, Cache)},
       {ReachabilityCache1, Reachable}
   end.
 
 %% Don't crash if lashup is broken
-is_reachable_real(IP) ->
-  case catch ets:lookup(reachability_cache, IP) of
-    [{IP, true}] ->
-      true;
-    _ ->
-      false
-  end.
+-spec(is_reachable_real(inet:ip4_address(), lashup_gm_route:tree() | false) -> boolean()).
+is_reachable_real(_IP, false) ->
+  false;
+is_reachable_real(IP, Tree) ->
+  Nodenames = minuteman_lashup_index:nodenames(IP),
+  lists:any(fun(Node) -> lashup_gm_route:distance(Node, Tree) =/= infinity end, Nodenames).
 
 get_ewma_or_default({IP, Port}) ->
   case ets:lookup(connection_ewma, {IP, Port}) of
@@ -542,10 +561,6 @@ stop() ->
   gen_server:call(?MODULE, clear),
   gen_server:stop(?MODULE).
 
-setup_ets() ->
-  reachability_cache = ets:new(reachability_cache, [set, named_table, {read_concurrency, true}]).
-stop_ets() ->
-  true = ets:delete(reachability_cache).
 
 proper_test() ->
   [] = proper:module(?MODULE).
@@ -633,11 +648,11 @@ prop_server_works_fine() ->
   ?FORALL(Cmds, commands(?MODULE),
           ?TRAPEXIT(
              begin
-               setup_ets(),
+               {ok, Pid} = lashup_gm_route:start_link(),
                ?MODULE:start_link(),
                {History, State, Result} = run_commands(?MODULE, Cmds),
                ?MODULE:stop(),
-               stop_ets(),
+               exit(Pid, shutdown),
                ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
                                    [History, State, Result]),
                          Result =:= ok)

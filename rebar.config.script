@@ -1,0 +1,16 @@
+Platform =
+case os:type() of
+    {unix, linux} ->
+        linux;
+    _ ->
+        false
+end.
+Fun =
+    fun
+        ({overrides, Overrides}) when Platform =/= linux ->
+            {overrides, lists:keydelete(gen_socket, 2, Overrides)};
+        (Term) ->
+            Term
+    end.
+
+lists:map(Fun, CONFIG).

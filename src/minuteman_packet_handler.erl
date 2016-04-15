@@ -161,6 +161,8 @@ foreign_to_foreign_test() ->
   VIPs = orddict:store(VIP, [Backend], []),
   minuteman_vip_server:push_vips(VIPs),
   {ok, _} = minuteman_ewma:start_link(),
+  {ok, TreePid} = lashup_gm_route:start_link(),
+  unlink(TreePid),
 
   meck:new(minuteman_iface_server),
   meck:expect(minuteman_iface_server, is_local, fun is_local/1),
@@ -177,6 +179,7 @@ foreign_to_foreign_test() ->
   ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
   meck:unload(),
   ok = gen_server:call(minuteman_vip_server, stop),
-  ok = gen_server:call(minuteman_ewma, stop).
+  ok = gen_server:call(minuteman_ewma, stop),
+  gen_server:stop(TreePid, shutdown, 5000).
 
 -endif.

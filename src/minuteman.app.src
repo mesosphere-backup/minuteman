@@ -15,7 +15,6 @@
                   telemetry,
                   gen_socket,
                   gen_netlink,
-                  riak_dt,
                   mochiweb,
                   webmachine
                  ]},

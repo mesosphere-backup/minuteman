@@ -44,10 +44,10 @@ ct:
 ##
 
 rel:
-		./rebar3 release
+		./rebar3 as prod release
 
 stage:
-		./rebar3 release -d
+		./rebar3 release
 
 DIALYZER_APPS = kernel stdlib erts sasl eunit syntax_tools compiler crypto
 

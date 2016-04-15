@@ -7,6 +7,9 @@ dependencies:
     - ~/.dialyzer_core*
     - ~/.rebar
     - .rebar
+    - .cache
+    - _build
+    - ~/.cache
   pre:
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
     - if [ ! -d ~/extras/otp/18.1 ]; then ./kerl build 18.1 18.1; ./kerl install 18.1 ~/extras/otp/18.1; fi
