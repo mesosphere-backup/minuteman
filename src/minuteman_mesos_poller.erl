@@ -148,6 +148,7 @@ handle_info(poll, State) ->
     {ok, RefreshedState} ->
       RefreshedState
   end,
+  {ok, _} = timer:send_after(minuteman_config:poll_interval(), poll),
   {noreply, NewState};
 handle_info(_Info, State) ->
   {noreply, State}.
@@ -192,7 +193,6 @@ code_change(_OldVsn, State, _Extra) ->
 -spec(poll(State :: #state{}) -> {ok, #state{}} | {error, http_error}).
 poll(State) ->
   lager:debug("Starting poll cycle"),
-  {ok, _} = timer:send_after(minuteman_config:poll_interval(), poll),
   MasterURI = minuteman_config:master_uri(),
   Response = httpc:request(get, {MasterURI, []}, [], [{body_format, binary}]),
   case handle_response(State, Response) of
