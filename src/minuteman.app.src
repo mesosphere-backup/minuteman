@@ -1,7 +1,9 @@
 {application, minuteman,
  [
-  {description, ""},
+  {description, "Minuteman Distributed Load Balancer"},
   {vsn, "1"},
+  {maintainers, ["Sargun Dhillon <sargun@mesosphere.com", "Tyler Neely <tyler@mesosphere.com>"]},
+  {licenses, ["Apache"]},
   {registered, []},
   {applications, [
                   kernel,
