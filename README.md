@@ -113,7 +113,7 @@ Once the packet is on the nfqueue, we calculate the backend that the connection 
 
 Once the NAT programming is done, the packet is released back into the kernel. Since our rules are in the raw chain the packet doesn't yet have a conntrack entry associated with it. The conntrack subsystem recognizes the connection based on the prior program and continues to handle the rest of the flow independently from the load balancer.
 
-### Load balancing alogrithm
+### Load balancing algorithm
 The load balancing algorithm is adapted from *The Power of Two Choices in Randomized Load Balancing* (IEEE Trans. Parallel Distrib. Syst. 12, Michael Mitzenmacher). We switch between this algorithm in the raw sense, and a more probablistic algorithm depending on whether or not more than 10 backends exist for a given VIP. The simple vs. probabilistic algorithm utilization is exposed in the metrics information.
 
 The simple algorithm maintains an EWMA of latencies for a given backend at connection time. It also maintains a set of consecutive failures, and when they happened. If a backend observes enough consecutive failures in a short period of time (<5m) it is considered to be unavailable. A failure is classified as three way handshake failing to occur.
@@ -128,3 +128,14 @@ The load balancer includes a state of the art failure detection scheme. This fai
 Every node maintains an adjacency table. These adjacency tables are gossiped to every other node in the cluster. These adjacency tables are then used to build an application-level multicast overlay.
 
 These connections are monitored via an adaptive ping algorithm. The adaptive ping algorithm maintains a window of pings between neighbors, and if the ping times out, they sever the connections. Once this connection is severed the new adjacencies are gossiped to all other nodes, therefore potentially triggering cascading healthchecks. This allows the system to detect failures in less than a second. Although, the system has backpressure when there are lots of failures, and fault detection can rise to 30 seconds.
+
+#### Evaluation
+We evaluated the fault-detection of Minuteman in a real world situation. We created a cluster with 40 physical Minuteman / Lashup nodes, and 1000 tasks in one VIP. The testing node created a new connection for every request, and ran 10 threads, each capped at 10 requests a second. 
+
+At 5 seconds into both tests, we failed 12.5% of the machines by artificially introducing a kernel panic. Our purpose of the test was to try to measure the latency deviation, and the time to repair.
+##### Active Failure Detection - Pre-Lashup
+Active Failure Detection
+![Pre-Lashup Graph](http://i.imgur.com/V4dG2nQ.png) 
+##### Passive Failure Detection - Post-Lashup
+![Post-Lashup Imgur](http://i.imgur.com/KrRho2T.png)
+[Basho Bench Config](https://gist.github.com/sargun/47b21249a4e9153bd3a0312d201dac1e)
