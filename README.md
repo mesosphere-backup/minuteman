@@ -1,7 +1,7 @@
 # Minuteman
 [![Circle CI](https://circleci.com/gh/dcos/minuteman.svg?style=svg&circle-token=571c4d23069b744377653d0f1246296c784bd9b0)](https://circleci.com/gh/dcos/minuteman)
 
-A distributed, highly available load balancer.
+minuteman is a distributed, highly available load balancer for distributed systems (microservices and containers), it powers [DC/OS](http://dcos.io) and tightly integrates with Marathon, the container orchestrator for DC/OS
 
 ## Powers:
 * VIPs: https://dcos.io/docs/1.7/overview/service-discovery/
