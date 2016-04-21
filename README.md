@@ -115,13 +115,13 @@ Once the packet is on the nfqueue, we calculate the backend that the connection 
 Once the NAT programming is done, the packet is released back into the kernel. Since our rules are in the raw chain the packet doesn't yet have a conntrack entry associated with it. The conntrack subsystem recognizes the connection based on the prior program and continues to handle the rest of the flow independently from the load balancer.
 
 ### Load balancing algorithm
-The load balancing algorithm is adapted from *The Power of Two Choices in Randomized Load Balancing* (IEEE Trans. Parallel Distrib. Syst. 12, Michael Mitzenmacher). We switch between this algorithm in the raw sense, and a more probablistic algorithm depending on whether or not more than 10 backends exist for a given VIP. The simple vs. probabilistic algorithm utilization is exposed in the metrics information.
+The load balancing algorithm is adapted from *The Power of Two Choices in Randomized Load Balancing* (IEEE Trans. Parallel Distrib. Syst. 12, Michael Mitzenmacher). We switch between this algorithm in the raw sense, and a more probabilistic algorithm depending on whether or not more than 10 backends exist for a given VIP. The simple vs. probabilistic algorithm utilization is exposed in the metrics information.
 
 The simple algorithm maintains an EWMA of latencies for a given backend at connection time. It also maintains a set of consecutive failures, and when they happened. If a backend observes enough consecutive failures in a short period of time (<5m) it is considered to be unavailable. A failure is classified as three way handshake failing to occur.
 
 The primary way the algorithm works is that it iterates over the backends and finds those that we assume are available after taking the the historical failures as well as the group failure detector. It then takes two random nodes from the most available bucket.
 
-The probabalistic failure detector randomly chooses backends and checks whether or not the group failure detector considers the agent to be alive. It will continue to do this until it either finds 2 backends that are in the ideal bucket, or until 20 lookups happen. If the prior case happens, it'll choose one at random. If the latter case happens it'll choose one of the 20 at random.
+The probabilistic failure detector randomly chooses backends and checks whether or not the group failure detector considers the agent to be alive. It will continue to do this until it either finds 2 backends that are in the ideal bucket, or until 20 lookups happen. If the prior case happens, it'll choose one at random. If the latter case happens it'll choose one of the 20 at random.
 
 ### Failure detection
 The load balancer includes a state of the art failure detection scheme. This failure detection scheme takes some of the work done in the [Hyparview](http://asc.di.fct.unl.pt/~jleitao/pdf/dsn07-leitao.pdf) work. The failure detector maintains a fully connected sparse graph of connections amongst the nodes in the cluster.
