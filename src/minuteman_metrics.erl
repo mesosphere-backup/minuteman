@@ -11,7 +11,7 @@
 -author("Sargun Dhillon").
 
 
--export([update/3, setup/0, lashup/1, inspect_backend/1]).
+-export([update/3, setup/0, inspect_backend/1]).
 
 -ifdef(TEST).
 update(_Metric, _Value, _Type) ->
@@ -57,15 +57,4 @@ setup() ->
     {
       function, erlang, statistics, ['$dp'], value,
       ['run_queue']
-    }, []),
-  exometer:ensure([lashup],
-    {
-      function, ?MODULE, lashup, ['$dp'], value,
-      ['active_view', 'passive_view']
-    }, [{cache, 5000}]).
-
-lashup(active_view) ->
-  lashup_hyparview_membership:get_active_view();
-
-lashup(passive_view) ->
-  lashup_hyparview_membership:get_active_view().
+    }, []).
