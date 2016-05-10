@@ -24,7 +24,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {lashup_gm_monitor = erlang:error() :: reference()}).
+-record(state, {}).
 -type state() :: #state{}.
 
 -include("minuteman_lashup.hrl").
@@ -64,8 +64,7 @@ start_link() ->
   {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([]) ->
-  Ref = monitor(process, lashup_gm),
-  State = #state{lashup_gm_monitor = Ref},
+  State = #state{},
   gen_server:cast(self(), check_metadata),
   {ok, State}.
 
@@ -118,8 +117,6 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: state()} |
   {noreply, NewState :: state(), timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: state()}).
-handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State) when MonitorRef == State#state.lashup_gm_monitor ->
-  {stop, lashup_gm_failure, State};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -159,7 +156,8 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 check_metadata() ->
-  NodeMetadata = lashup_kv:value([node_metadata, node()]),
+  LashupNode = minuteman_config:lashup_node(),
+  NodeMetadata = lashup_kv:value(LashupNode, [node_metadata, node()]),
   NodeMetadataDict = orddict:from_list(NodeMetadata),
   Ops = check_ip(NodeMetadataDict, []),
   Ops1 = check_node_id(NodeMetadata, Ops),
@@ -169,11 +167,12 @@ check_metadata() ->
 perform_ops([]) ->
   ok;
 perform_ops(Ops) ->
-  {ok, _} = lashup_kv:request_op([node_metadata, node()], {update, Ops}).
+  LashupNode = minuteman_config:lashup_node(),
+  {ok, _} = lashup_kv:request_op(LashupNode, [node_metadata, node()], {update, Ops}).
 
 
 check_node_id(NodeMetadata, Ops) ->
-  ID = lashup_gm:id(),
+  ID = node(),
   check_node_id(ID, NodeMetadata, Ops).
 
 check_node_id(ID, NodeMetadata, Ops) ->

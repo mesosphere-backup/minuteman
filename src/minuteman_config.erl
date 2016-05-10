@@ -20,7 +20,8 @@
   tcp_failed_backend_backoff_period/0,
   api_listen_ip/0,
   api_listen_port/0,
-  agent_reregistration_threshold/0
+  agent_reregistration_threshold/0,
+  lashup_node/0
   ]).
 
 
@@ -67,3 +68,14 @@ queue() ->
 
 networking() ->
   application:get_env(minuteman, enable_networking, true).
+
+lashup_node() ->
+  application:get_env(minuteman, lashup_node, lashup_node_default()).
+
+lashup_node_default() ->
+  MyNodeAtom = node(),
+  MyNodeStr = atom_to_list(MyNodeAtom),
+  [_, Hostname] = string:tokens(MyNodeStr, "@"),
+  LashupNodeStr = lists:flatten(string:join(["lashup", Hostname], "@")),
+  list_to_atom(LashupNodeStr).
+

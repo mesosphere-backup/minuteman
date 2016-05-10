@@ -94,7 +94,8 @@ start_link() ->
 init([]) ->
   node_ip = ets:new(node_ip, [bag, named_table, {keypos, #node_ip.ip}]),
   node_id = ets:new(node_id, [set, named_table, {keypos, #node_ip.nodename}]),
-  {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({[node_metadata|_]}) -> true end)),
+  LashupNode = minuteman_config:lashup_node(),
+  {ok, Ref} = lashup_kv_events_helper:start_link(LashupNode, ets:fun2ms(fun({[node_metadata|_]}) -> true end)),
   {ok, #state{ref = Ref}}.
 
 %%--------------------------------------------------------------------
