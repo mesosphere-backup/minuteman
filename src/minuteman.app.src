@@ -16,7 +16,6 @@
                   lashup,
                   telemetry,
                   gen_socket,
-                  gen_netlink,
                   mochiweb,
                   webmachine
                  ]},
