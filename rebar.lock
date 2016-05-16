@@ -84,7 +84,7 @@
   0},
  {<<"telemetry">>,
   {git,"git://github.com/dcos/telemetry-net.git",
-       {ref,"2c6d551aecabbac5d7f2cb85b1d20bc03dcd5954"}},
+       {ref,"419da05c2a4ffc573226005048628555be3a5880"}},
   0},
  {<<"webmachine">>,
   {git,"git://github.com/basho/webmachine",
