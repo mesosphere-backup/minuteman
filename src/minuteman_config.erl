@@ -12,7 +12,7 @@
 
 %% API
 -export([master_uri/0,
-  poll_interval/0,
+  agent_poll_interval/0,
   queue/0,
   networking/0,
   tcp_connect_threshold/0,
@@ -20,7 +20,9 @@
   tcp_failed_backend_backoff_period/0,
   api_listen_ip/0,
   api_listen_port/0,
-  agent_reregistration_threshold/0
+  agent_reregistration_threshold/0,
+  agent_polling_enabled/0,
+  agent_port/0
   ]).
 
 
@@ -28,9 +30,8 @@ master_uri() ->
   application:get_env(minuteman, master_uri, "http://localhost:5050/state.json").
 
 
-poll_interval() ->
-  application:get_env(minuteman, poll_interval, 5000).
-
+agent_poll_interval() ->
+  application:get_env(minuteman, agent_poll_interval, 500).
 
 tcp_connect_threshold() ->
   application:get_env(minuteman, tcp_connect_threshold, 400).
@@ -67,3 +68,10 @@ queue() ->
 
 networking() ->
   application:get_env(minuteman, enable_networking, true).
+
+agent_polling_enabled() ->
+  application:get_env(minuteman, agent_polling_enabled, true).
+
+agent_port() ->
+  application:get_env(minuteman, agent_port, 5051).
+

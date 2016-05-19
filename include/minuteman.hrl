@@ -83,3 +83,5 @@
   minuteman_ct_8
   ]
 ).
+
+-define(VIPS_KEY, [minuteman, vips]).
