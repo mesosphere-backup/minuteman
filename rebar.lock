@@ -87,6 +87,6 @@
        {ref,"419da05c2a4ffc573226005048628555be3a5880"}},
   0},
  {<<"webmachine">>,
-  {git,"git://github.com/basho/webmachine",
+  {git,"git://github.com/webmachine/webmachine",
        {ref,"7677c240f4a7ed020f4bab48278224966bb42311"}},
   0}].
