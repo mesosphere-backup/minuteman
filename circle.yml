@@ -8,7 +8,6 @@ dependencies:
     - ~/.rebar
     - .rebar
     - .cache
-    - _build
     - ~/.cache
   pre:
     - sudo service mongodb stop
