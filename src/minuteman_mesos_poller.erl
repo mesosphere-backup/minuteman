@@ -43,6 +43,8 @@
     last_poll_time = undefined :: integer() | undefined
 }).
 
+-type state() :: #state{}.
+
 -record(vip_be, {
     protocol = erlang:error() :: tcp,
     vip_ip = erlang:error() :: inet:ip4_address(),
@@ -87,7 +89,7 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(init(Args :: term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
+    {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
     PollInterval = minuteman_config:agent_poll_interval(),
@@ -103,13 +105,13 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-    State :: #state{}) ->
-    {reply, Reply :: term(), NewState :: #state{}} |
-    {reply, Reply :: term(), NewState :: #state{}, timeout() | hibernate} |
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
-    {stop, Reason :: term(), NewState :: #state{}}).
+    State :: state()) ->
+    {reply, Reply :: term(), NewState :: state()} |
+    {reply, Reply :: term(), NewState :: state(), timeout() | hibernate} |
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
+    {stop, Reason :: term(), NewState :: state()}).
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
@@ -120,10 +122,10 @@ handle_call(_Request, _From, State) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(handle_cast(Request :: term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
+-spec(handle_cast(Request :: term(), State :: state()) ->
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: state()}).
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -137,10 +139,10 @@ handle_cast(_Request, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
--spec(handle_info(Info :: timeout() | term(), State :: #state{}) ->
-    {noreply, NewState :: #state{}} |
-    {noreply, NewState :: #state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #state{}}).
+-spec(handle_info(Info :: timeout() | term(), State :: state()) ->
+    {noreply, NewState :: state()} |
+    {noreply, NewState :: state(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: state()}).
 handle_info(poll, State) ->
     NewState = maybe_poll(State),
     PollInterval = minuteman_config:agent_poll_interval(),
@@ -161,7 +163,7 @@ handle_info(_Info, State) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-    State :: #state{}) -> term()).
+    State :: state()) -> term()).
 terminate(_Reason, _State) ->
     ok.
 
@@ -173,9 +175,9 @@ terminate(_Reason, _State) ->
 %% @spec code_change(OldVsn, State, Extra) -> {ok, NewState}
 %% @end
 %%--------------------------------------------------------------------
--spec(code_change(OldVsn :: term() | {down, term()}, State :: #state{},
+-spec(code_change(OldVsn :: term() | {down, term()}, State :: state(),
     Extra :: term()) ->
-    {ok, NewState :: #state{}} | {error, Reason :: term()}).
+    {ok, NewState :: state()} | {error, Reason :: term()}).
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -224,6 +226,7 @@ handle_poll_failure(TimeSinceLastPoll, State) when TimeSinceLastPoll > ?AGENT_TI
 handle_poll_failure(_TimeSinceLastPoll, State) ->
     State.
 
+-spec(handle_poll_state(mesos_state_client:mesos_agent_state(), state()) -> state()).
 handle_poll_state(MesosState, State) ->
     VIPBEs = collect_vips(MesosState, State),
     LashupVIPs = lashup_kv:value(?VIPS_KEY),
@@ -314,6 +317,8 @@ unflatten_vips(VIPBes) ->
         ),
     orddict:map(fun(_Key, Value) -> ordsets:from_list(Value) end, VIPBEsDict).
 
+-spec(collect_vips(MesosState :: mesos_state_client:mesos_agent_state(), State :: state()) ->
+    [{VIP :: protocol_vip(), [Backend :: ip_port()]}]).
 collect_vips(MesosState, _State) ->
     Tasks = mesos_state_client:tasks(MesosState),
     Tasks1 =
@@ -367,15 +372,18 @@ collect_vips_from_discovery_info_fold([#mesos_port{protocol = Protocol, labels =
             end,
             PortLabels
     ),
-    VIPBins = [VIPBin || {_, VIPBin} <- maps:to_list(VIPLabels)],
+    VIPBins = [{VIPBin, Task} || {_, VIPBin} <- maps:to_list(VIPLabels)],
     VIPs = lists:map(fun parse_vip/1, VIPBins),
     BEs = [#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
         backend_ip =  AgentIP} || {VIPIP, VIPPort} <- VIPs],
     collect_vips_from_discovery_info_fold(Ports, Task, BEs ++ Acc).
 
+%({binary(),_}) -> {{'name',{binary(),'undefined' | binary()}} | {byte(),byte(),byte(),byte()},'error' | integer()}
 
-
-parse_vip(LabelBin) ->
+-type label_value() :: binary().
+-type name_or_ip() :: inet:ip4_address() | {name, Hostname :: binary(), FrameworkName :: framework_name()}.
+-spec(parse_vip({LabelBin :: label_value(), task()}) -> {name_or_ip(), inet:port_number()}).
+parse_vip({LabelBin, Task = #task{}}) ->
     [HostBin, PortBin] = binary:split(LabelBin, <<":">>),
     HostStr = binary_to_list(HostBin),
     Host =
@@ -383,10 +391,11 @@ parse_vip(LabelBin) ->
             {ok, HostIP} ->
                 HostIP;
             _ ->
-                HostStr
+                {name, {HostBin, Task#task.framework_name}}
         end,
     PortStr = binary_to_list(PortBin),
     {Port, []} = string:to_integer(PortStr),
+    true = is_integer(Port),
     {Host, Port}.
 
 
@@ -404,17 +413,18 @@ collect_vips_from_tasks_labels([Task | Tasks], VIPBEs) ->
     collect_vips_from_tasks_labels(Tasks, VIPBEs1).
 
 collect_vips_from_task_labels(Task = #task{labels = TaskLabels}) ->
-    VIPLabels =
-        maps:filter(
-            fun(Key, _Value) ->
+    VIPLabelsKeys0 = maps:keys(TaskLabels),
+
+    VIPLabelsKeys1 =
+        lists:filter(
+            fun(Key) ->
                 KeyStr = binary_to_list(Key),
                 KeyStrUpper = string:to_upper(KeyStr),
                 string:str(KeyStrUpper, ?VIP_PORT) == 1
             end,
-            TaskLabels
+            VIPLabelsKeys0
         ),
-    VIPLabelsKeys = maps:keys(VIPLabels),
-    collect_vips_from_task_labels_fold(VIPLabelsKeys, Task, []).
+    collect_vips_from_task_labels_fold(VIPLabelsKeys1, Task, []).
 
 
 collect_vips_from_task_labels_fold([], _Task, Acc) ->
@@ -485,7 +495,28 @@ string_to_integer(Str) ->
 fake_state() ->
     #state{agent_ip = {0, 0, 0, 0}}.
 
-basic_test() ->
+two_healthcheck_free_vips_test() ->
+    {ok, Data} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {4, 3, 2, 1}, 1234},
+                [
+                    {{33, 33, 33, 1}, 31362},
+                    {{33, 33, 33, 1}, 31634}
+                ]
+        },
+        {
+            {tcp, {4, 3, 2, 2}, 1234},
+                [
+                    {{33, 33, 33, 1}, 31215},
+                    {{33, 33, 33, 1}, 31290}
+                ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+state2_test() ->
     {ok, Data} = file:read_file("testdata/state2.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     VIPBes = collect_vips(MesosState, fake_state()),
@@ -494,6 +525,34 @@ basic_test() ->
             {tcp, {1, 2, 3, 4}, 5000},
             [
                 {{10, 10, 0, 109}, 8014}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+state3_test() ->
+    {ok, Data} = file:read_file("testdata/state3.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {1, 2, 3, 4}, 5000},
+            [
+                {{10, 0, 0, 243}, 26645}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+
+
+state4_test() ->
+    {ok, Data} = file:read_file("testdata/state4.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {1, 2, 3, 4}, 5000},
+            [
+                {{10, 0, 0, 243}, 26645}
             ]
         }
     ],
@@ -508,6 +567,21 @@ di_state_test() ->
             {tcp, {1, 2, 3, 4}, 8080},
             [
                 {{10, 0, 2, 234}, 19426}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+
+
+named_vips_test() ->
+    {ok, Data} = file:read_file("testdata/named-base-vips.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {name, {<<"merp">>, <<"marathon">>}}, 5000},
+            [
+                {{10, 0, 0, 243}, 12049}
             ]
         }
     ],
