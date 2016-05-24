@@ -2,7 +2,7 @@
 [![Circle CI](https://circleci.com/gh/dcos/minuteman.svg?style=svg&circle-token=571c4d23069b744377653d0f1246296c784bd9b0)](https://circleci.com/gh/dcos/minuteman)
 [![velocity](http://velocity.mesosphere.com/service/velocity/buildStatus/icon?job=public-dcos-networking-minuteman-master)](http://velocity.mesosphere.com/service/velocity/job/public-dcos-networking-minuteman-master/)
 
-A distributed, highly available load balancer for distributed systems (microservices and containers).
+A distributed, highly available service discovery & internal load balancer for distributed systems (microservices and containers).
 
 ## Powers:
 * VIPs: https://dcos.io/docs/1.7/overview/service-discovery/
