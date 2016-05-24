@@ -11,8 +11,16 @@ dependencies:
     - _build
     - ~/.cache
   pre:
+    - sudo service mongodb stop
+    - sudo service rabbitmq-server stop
+    - sudo service couchdb stop
+    - sudo service zookeeper stop
+    - sudo service mysql stop
+    - sudo service postgresql stop
+    - sudo service redis-server stop
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
-    - if [ ! -d ~/extras/otp/18.3 ]; then ./kerl build 18.3 18.3; ./kerl install 18.3 ~/extras/otp/18.3; fi
+    - if [ ! -d ~/extras/otp/18.3 ]; then ./kerl build 18.3 18.3; ./kerl install 18.3 ~/extras/otp/18.3; fi:
+        timeout: 1800
   override:
     - make
 
