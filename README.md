@@ -29,7 +29,7 @@ It is recommended when you use our VIPs you keep long-running, persistent connec
 We also recommend taking advantage of Mesos healthchecks. Mesos healthchecks are surfaced to the load balancing layer. **Marathon** only converts **command** healthchecks to Mesos healthchecks. You can simulate HTTP healthchecks via a command similar to `test "$(curl -4 -w '%{http_code}' -s http://localhost:${PORT0}/|cut -f1 -d" ")" == 200`. This ensures the HTTP status code returned is 200. It also assumes your application binds to localhost. The ${PORT0} is set as a variable by Marathon. We do not recommend using TCP healthchecks as they can be misleading as to the liveness of a service.
 
 ### Demo
-If you would like to run a demo, you can configure a Marathon app as mentioned above, and use the URI `https://s3.amazonaws.com/sargun-mesosphere/linux-amd64`, as well as the command `chmod 755 linux-amd64 && ./linux-amd64 -listener=:${PORT0} -say-string=version1` to execute it. You can then test it by hitting the application with the command: `curl http://1.2.3.4:5000`. This app exposes an HTTP API. This HTTP API answers with the PID, hostname, and the 'say-string' that's specified in the app definition. In addition, it exposes a long-running endpoint at `http://1.2.3.4:5000/stream`, which will continue to stream until the connection is terminated. The code for the application is available here: `https://github.com/mesosphere/helloworld`.
+If you would like to run a demo, you can configure a Marathon app as mentioned above, and use the URI `https://s3.amazonaws.com/sargun-mesosphere/linux-amd64`, as well as the command `chmod 755 linux-amd64 && ./linux-amd64 -listener=:${PORT0} -say-string=version1` to execute it. You can then test it by hitting the application with the command: `curl http://10.1.2.3:5000`. This app exposes an HTTP API. This HTTP API answers with the PID, hostname, and the 'say-string' that's specified in the app definition. In addition, it exposes a long-running endpoint at `http://10.1.2.3:5000/stream`, which will continue to stream until the connection is terminated. The code for the application is available here: `https://github.com/mesosphere/helloworld`.
 
 #### Exposing it to the outside
 Prior to this, you had to run a complex proxy that would reconfigure based on the tasks running on the cluster. Fortunately, you no longer need to do this. Instead, you can have an incredible simple HAProxy configuration like so:
@@ -45,7 +45,7 @@ defaults
 listen appname 0.0.0.0:80
     mode tcp
     balance roundrobin
-    server mybackend 1.2.3.4:5000
+    server mybackend 10.1.2.3:5000
 ```
 
 A Marathon app definition for this looks like:
