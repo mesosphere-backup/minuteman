@@ -391,7 +391,8 @@ parse_vip({LabelBin, Task = #task{}}) ->
             {ok, HostIP} ->
                 HostIP;
             _ ->
-                {name, {HostBin, Task#task.framework_name}}
+                #task{framework = #framework{name = FrameworkName}} = Task,
+                {name, {HostBin, FrameworkName}}
         end,
     PortStr = binary_to_list(PortBin),
     {Port, []} = string:to_integer(PortStr),

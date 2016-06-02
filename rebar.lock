@@ -68,7 +68,7 @@
   0},
  {<<"mesos_state">>,
   {git,"git://github.com/dcos/mesos_state",
-       {ref,"14276744bfd9846921425d37eb5d8070d461b870"}},
+       {ref,"24e0d233fb785ee2df55f1abcd804b2801238080"}},
   0},
  {<<"mochiweb">>,
   {git,"git://github.com/basho/mochiweb.git",
