@@ -9,10 +9,10 @@ A distributed, highly available service discovery & internal load balancer for d
 * [DC/OS](http://dcos.io)
 
 ## Usage
-You can use the layer 4 load balancer by specifying a VIP from the Marathon UI. The VIP must be specified in the format IP:port, for example: *1.2.3.4:5000*. Alternatively, if you're using something other than Marathon, you can create a label on the [port](https://github.com/apache/mesos/blob/b18f5bf48fda12bce9c2ac8e762a08f537ffb41d/include/mesos/mesos.proto#L1813) protocol buffer while launching a task on Mesos. This label's key must be in the format `VIP_$IDX`, where `$IDX` is replaced by a number, starting from 0. Once you create a task, or a set of tasks with a VIP, they will automatically become available to all nodes in the cluster, including the masters.
+You can use the layer 4 load balancer by specifying a VIP from the Marathon UI. The VIP must be specified in the format IP:port, for example: *10.1.2.3:5000*. Alternatively, if you're using something other than Marathon, you can create a label on the [port](https://github.com/apache/mesos/blob/b18f5bf48fda12bce9c2ac8e762a08f537ffb41d/include/mesos/mesos.proto#L1813) protocol buffer while launching a task on Mesos. This label's key must be in the format `VIP_$IDX`, where `$IDX` is replaced by a number, starting from 0. Once you create a task, or a set of tasks with a VIP, they will automatically become available to all nodes in the cluster, including the masters.
 
 ### Details
-When you launch a set of tasks when these labels, we distribute them to all of the nodes in the cluster. All of the nodes in the cluster act as decision makers in the load balancing process. There is a process that runs on all the agents which is consulted by the kernel when packets are recognized with this destination address. This process keeps track of availability and reachability of these tasks to attempt to send requests to the right backends
+When you launch a set of tasks with these labels, we distribute them to all of the nodes in the cluster. All of the nodes in the cluster act as decision makers in the load balancing process. There is a process that runs on all the agents which is consulted by the kernel when packets are recognized with this destination address. This process keeps track of availability and reachability of these tasks to attempt to send requests to the right backends
 
 ### Recommendations
 
@@ -29,7 +29,7 @@ It is recommended when you use our VIPs you keep long-running, persistent connec
 We also recommend taking advantage of Mesos healthchecks. Mesos healthchecks are surfaced to the load balancing layer. **Marathon** only converts **command** healthchecks to Mesos healthchecks. You can simulate HTTP healthchecks via a command similar to `test "$(curl -4 -w '%{http_code}' -s http://localhost:${PORT0}/|cut -f1 -d" ")" == 200`. This ensures the HTTP status code returned is 200. It also assumes your application binds to localhost. The ${PORT0} is set as a variable by Marathon. We do not recommend using TCP healthchecks as they can be misleading as to the liveness of a service.
 
 ### Demo
-If you would like to run a demo, you can configure a Marathon app as mentioned above, and use the URI `https://s3.amazonaws.com/sargun-mesosphere/linux-amd64`, as well as the command `chmod 755 linux-amd64 && ./linux-amd64 -listener=:${PORT0} -say-string=version1` to execute it. You can then test it by hitting the application with the command: `curl http://1.2.3.4:5000`. This app exposes an HTTP API. This HTTP API answers with the PID, hostname, and the 'say-string' that's specified in the app definition. In addition, it exposes a long-running endpoint at `http://1.2.3.4:5000/stream`, which will continue to stream until the connection is terminated. The code for the application is available here: `https://github.com/mesosphere/helloworld`.
+If you would like to run a demo, you can configure a Marathon app as mentioned above, and use the URI `https://s3.amazonaws.com/sargun-mesosphere/linux-amd64`, as well as the command `chmod 755 linux-amd64 && ./linux-amd64 -listener=:${PORT0} -say-string=version1` to execute it. You can then test it by hitting the application with the command: `curl http://10.1.2.3:5000`. This app exposes an HTTP API. This HTTP API answers with the PID, hostname, and the 'say-string' that's specified in the app definition. In addition, it exposes a long-running endpoint at `http://10.1.2.3:5000/stream`, which will continue to stream until the connection is terminated. The code for the application is available here: `https://github.com/mesosphere/helloworld`.
 
 #### Exposing it to the outside
 Prior to this, you had to run a complex proxy that would reconfigure based on the tasks running on the cluster. Fortunately, you no longer need to do this. Instead, you can have an incredible simple HAProxy configuration like so:
@@ -45,7 +45,7 @@ defaults
 listen appname 0.0.0.0:80
     mode tcp
     balance roundrobin
-    server mybackend 1.2.3.4:5000
+    server mybackend 10.1.2.3:5000
 ```
 
 A Marathon app definition for this looks like:
