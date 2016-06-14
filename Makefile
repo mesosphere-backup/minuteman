@@ -26,7 +26,7 @@ packageclean:
 ## Test targets
 ##
 
-check: test xref dialyzer
+check: test xref dialyzer cover
 
 test: ct eunit
 
@@ -38,6 +38,9 @@ eunit:
 
 ct:
 	./rebar3 as test ct
+
+cover:
+	./rebar3 as test cover
 
 ##
 ## Release targets
