@@ -47,8 +47,7 @@
   % Number of in-flight measurements.
   pending = 0,
 
-  % 10 seconds in nanoseconds.
-  decay = 10.0e9
+  decay = minuteman_config:tcp_connect_latency_tracking_window_ms() * 1.0e6
   }).
 
 -record(backend, {

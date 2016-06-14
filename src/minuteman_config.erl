@@ -18,6 +18,7 @@
   tcp_connect_threshold/0,
   tcp_consecutive_failure_threshold/0,
   tcp_failed_backend_backoff_period/0,
+  tcp_connect_latency_tracking_window_ms/0,
   api_listen_ip/0,
   api_listen_port/0,
   agent_reregistration_threshold/0,
@@ -44,6 +45,9 @@ tcp_consecutive_failure_threshold() ->
 tcp_failed_backend_backoff_period() ->
   application:get_env(minuteman, tcp_failed_backend_backoff_period, 30000).
 
+
+tcp_connect_latency_tracking_window_ms() ->
+  application:get_env(minuteman, tcp_connect_latency_tracking_window_ms, 10000).
 
 api_listen_ip() ->
   application:get_env(minuteman, api_listen_ip, "0.0.0.0").
