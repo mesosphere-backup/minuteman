@@ -171,7 +171,8 @@ init([]) ->
   random:seed(erlang:phash2([node()]),
               erlang:monotonic_time(),
               erlang:unique_integer()),
-  backend_connections = ets:new(backend_connections, [set, {keypos, #backend.ip_port}, named_table, {read_concurrency, true}]),
+  backend_connections = ets:new(backend_connections,
+                                [set, {keypos, #backend.ip_port}, named_table, {read_concurrency, true}]),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
