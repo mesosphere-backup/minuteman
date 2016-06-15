@@ -19,10 +19,16 @@
   new_dst_port
   }).
 
--record(backend_tracking, {
+-record(backend, {
+  ip_port :: ip_port(),
+  clock = fun minuteman_lb:now/0,
+
   % total success and failure counters
   total_successes = 0,
   total_failures = 0,
+
+  % Number of in-flight connections.
+  pending = 0,
 
   % current count of consecutive failures
   consecutive_failures = 0,
@@ -32,30 +38,6 @@
   max_failure_threshold = minuteman_config:tcp_consecutive_failure_threshold(),
   last_failure_time = 0,
   failure_backoff =  minuteman_config:tcp_failed_backend_backoff_period() * 1.0e6
-  }).
-
--record(ewma, {
-  % Current value of the exponentially weighted moving average.
-  cost = 0,
-
-  % Used to measure the length of the exponential sliding window.
-  stamp = erlang:monotonic_time(nano_seconds),
-
-  % A large number for penalizing new backends, to ease up rates slowly.
-  penalty = 1.0e307,
-
-  % Number of in-flight measurements.
-  pending = 0,
-
-  % 10 seconds in nanoseconds.
-  decay = 10.0e9
-  }).
-
--record(backend, {
-  ip_port :: ip_port(),
-  clock = fun minuteman_ewma:now/0,
-  tracking = #backend_tracking{},
-  ewma = #ewma{}
   }).
 
 -define(SERVER_NAME_WITH_NUM(Num),

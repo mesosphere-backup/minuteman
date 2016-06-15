@@ -50,7 +50,7 @@ get_backend({IP, Port}) when is_tuple(IP) andalso is_integer(Port) ->
       %% This should never happen, but it's better than crashing
       error;
     [{_Key, Backends}] when is_list(Backends) ->
-      case minuteman_ewma:pick_backend(Backends) of
+      case minuteman_lb:pick_backend(Backends) of
         {ok, Backend} ->
           {ok, Backend#backend.ip_port};
         {error, Reason} ->

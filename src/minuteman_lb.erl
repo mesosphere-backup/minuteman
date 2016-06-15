@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 19. Dec 2015 3:12 AM
 %%%-------------------------------------------------------------------
--module(minuteman_ewma).
+-module(minuteman_lb).
 -author("Tyler Neely").
 
 -behaviour(gen_server).
@@ -15,12 +15,12 @@
 
 %% API
 -export([start_link/0,
-  observe/3,
-  set_pending/1,
+  decr_pending/2,
+  incr_pending/1,
   pick_backend/1,
   now/0,
-  get_ewma/1,
   is_open/1,
+  get_backend/1,
   cost/1
   ]).
 
@@ -67,11 +67,14 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
-observe(Measurement, {IP, Port}, Success) ->
-  gen_server:cast(?SERVER, {observe, {Measurement, {IP, Port}, Success}}).
+incr_pending({IP, Port}) ->
+  gen_server:cast(?SERVER, {incr_pending, {IP, Port}}).
 
-set_pending({IP, Port}) ->
-  gen_server:cast(?SERVER, {set_pending, {IP, Port}}).
+decr_pending({IP, Port}, Success) ->
+  gen_server:cast(?SERVER, {decr_pending, {IP, Port}, Success}).
+
+get_backend({IP, Port}) ->
+  get_backend_or_default({IP, Port}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -84,19 +87,55 @@ set_pending({IP, Port}) ->
 -spec(pick_backend(list(ip_port())) -> {ok, #backend{}} | {error, atom()}).
 pick_backend([]) ->
   {error, no_backends_available};
-%% 100 millisecond timeout for picking a backend seems reasonable
-%% 10 milliseconds resulted in too many false failures
-pick_backend(Backends) ->
-  pick_backend_internal(Backends).
 
+pick_backend(BackendAddrs) when length(BackendAddrs) > ?BACKEND_LIMIT ->
+  minuteman_metrics:update([probabilistic_backend_picker], 1, spiral),
+  Now = erlang:monotonic_time(),
+  ReachabilityCache = reachability_cache(),
+  Choice = probabilistic_backend_chooser(Now, ReachabilityCache, BackendAddrs, [], [], []),
+  {ok, Choice};
 
-%%--------------------------------------------------------------------
-%% @doc
-%%--------------------------------------------------------------------
-get_ewma({IP, Port}) ->
-  %% TODO(tyler) remove gen_server, hit ets directly and handle case
-  %% where the table is queried before being created.
-  gen_server:call(?SERVER, {get_ewma, {IP, Port}}).
+pick_backend(BackendAddrs) ->
+  minuteman_metrics:update([simple_backend_picker], 1, spiral),
+  %% Pull backends out of ets.
+  Now = erlang:monotonic_time(),
+  Backends = [get_backend_or_default(Backend) || Backend <- BackendAddrs],
+
+  {Up, Down} = lists:partition(fun (Backend) ->
+                                   is_open(Now, Backend)
+                               end, Backends),
+
+  % If there are no backends up, may as well try one that's down.
+  Choices = case Up of
+              [] ->
+                Down;
+              _ ->
+                Up
+            end,
+  Tree = tree(),
+  {ReachableTrue, ReachableFalse} = lists:partition(
+    fun(Backend) ->
+      {IP, _Port} = Backend#backend.ip_port,
+      is_reachable_real(IP, Tree)
+    end,
+    Choices),
+
+  % If there's only one choice, use it.  Otherwise, try to get two
+  % different random selections and pick the one with the better
+  % cost.
+  case Choices of
+    [Choice] ->
+      {ok, Choice};
+    _ ->
+      %% We know there must be at least two backends
+      {Backend1, ReachableTrue1, ReachableFalse1} =
+        choose_from_backends(ReachableTrue, ReachableFalse),
+      {Backend2, _, _} =
+        choose_from_backends(ReachableTrue1, ReachableFalse1),
+      Choice = choose_backend_by_cost(Backend1, Backend2),
+      {ok, Choice}
+  end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -132,7 +171,7 @@ init([]) ->
   random:seed(erlang:phash2([node()]),
               erlang:monotonic_time(),
               erlang:unique_integer()),
-  connection_ewma = ets:new(connection_ewma, [set, {keypos, #backend.ip_port}, named_table, {read_concurrency, true}]),
+  backend_connections = ets:new(backend_connections, [set, {keypos, #backend.ip_port}, named_table, {read_concurrency, true}]),
   {ok, #state{}}.
 
 %%--------------------------------------------------------------------
@@ -150,13 +189,11 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({pick_backend, Backends}, _From, State) ->
-  {reply, pick_backend_internal(Backends), State};
 handle_call(clear, _From, State) ->
-  ets:delete_all_objects(connection_ewma),
+  ets:delete_all_objects(backend_connections),
   {reply, ok, State};
-handle_call({get_ewma, {IP, Port}}, _From, State) ->
-  {reply, get_ewma_or_default({IP, Port}), State};
+handle_call({get_backend, {IP, Port}}, _From, State) ->
+  {reply, get_backend_or_default({IP, Port}), State};
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State};
 handle_call(_Request, _From, State) ->
@@ -173,33 +210,28 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_cast({observe, {Measurement, {IP, Port}, Success}}, State) ->
-  lager:debug("Observing connection success: ~p with time of ~.6f ms", [Success, Measurement / 1.0e6]),
-  Backend = get_ewma_or_default({IP, Port}),
-  Ewma = Backend#backend.ewma,
-  Clock = Backend#backend.clock,
-  ObservedEwma = observe_internal(Measurement, Clock(), Ewma),
-  NewEwma = decrement_pending(Success, ObservedEwma),
-
-  Tracking = Backend#backend.tracking,
-  NewTracking = track_success(Success, Tracking),
+handle_cast({decr_pending, {IP, Port}, Success}, State) ->
   notify_metrics(Success, {IP, Port}),
-
-  NewBackend = Backend#backend{ewma = NewEwma,
-    tracking = NewTracking},
-  true = ets:insert(connection_ewma, NewBackend),
+  Backend = get_backend_or_default({IP, Port}),
+  Pending = Backend#backend.pending,
+  %% TODO(tyler) make sure we aren't overreporting decr's, and then get rid of this max
+  NewPending = max(0, Pending - 1),
+  Backend2 = Backend#backend{pending = NewPending},
+  Backend3 = track_success(Success, Backend2),
+  true = ets:insert(backend_connections, Backend3),
   {noreply, State};
 
-
-handle_cast({set_pending, {IP, Port}}, State) ->
-  Backend = get_ewma_or_default({IP, Port}),
-  NewEwma = increment_pending(Backend#backend.ewma),
-  NewBackend = Backend#backend{ewma = NewEwma},
-  true = ets:insert(connection_ewma, NewBackend),
+handle_cast({incr_pending, {IP, Port}}, State) ->
+  Backend = get_backend_or_default({IP, Port}),
+  Pending = Backend#backend.pending,
+  NewPending = Pending + 1,
+  Backend2 = Backend#backend{pending = NewPending},
+  true = ets:insert(backend_connections, Backend2),
   {noreply, State};
 
 handle_cast(_Request, State) ->
   {noreply, State}.
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -250,49 +282,13 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Records a new value in the exponentially weighted moving average.
-%% This type of algorithm shows up all over the place in load balancer
-%% code, and here we're porting Twitter's P2CBalancerPeakEwma which
-%% factors time into our moving average.  This is nice because we
-%% can bias decisions more with recent information, allowing us to
-%% not have to assume a constant request rate to a particular service.
+%% Returns the cost of this backend. This used to use an EWMA, but now
+%% only returns the current number of pending requests.
 %% @end
 %%--------------------------------------------------------------------
--spec(observe_internal(Val :: float(), Now :: float(), _Ewma :: #ewma{}) -> #ewma{}).
-observe_internal(Val, Now, Ewma = #ewma{cost = Cost,
-                               stamp = Stamp,
-                               decay = Decay}) ->
-  TimeDelta = max(Now - Stamp, 0),
-  Weight = math:exp(-TimeDelta / Decay),
-  NewCost = case Val > Cost of
-              true -> Val;
-              false -> (Cost * Weight) + (Val * (1.0-Weight))
-            end,
-  Ewma#ewma{stamp = Now, cost = NewCost}.
-
-%%--------------------------------------------------------------------
-%% @doc
-%% Returns the cost of this according to the EWMA algorithm.
-%% @end
-%%--------------------------------------------------------------------
--spec(cost(#backend{}) -> float()).
-cost(#backend{ip_port = IPPort, clock = Clock, ewma = Ewma}) ->
-  % We observe 0 here to slide the exponential window forward by the
-  % amount of time that has passed since the last measurement.
-  Now = Clock(),
-  #ewma{cost = Cost, pending = Pending, penalty = Penalty} = observe_internal(0.0, Now, Ewma),
-
-  %% asynchronously persist a zero value, helping smooth things out over time
-  observe(0.0, IPPort, no_success_change),
-
-  case {float(Cost), float(Penalty)} of
-    {0.0, 0.0} ->
-      Cost * (Pending + 1);
-    {0.0, _} ->
-      Penalty + Pending;
-    _ ->
-      Cost * (Pending + 1)
-  end.
+-spec(cost(#backend{}) -> integer()).
+cost(#backend{pending = Pending}) ->
+  Pending.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -300,18 +296,18 @@ cost(#backend{ip_port = IPPort, clock = Clock, ewma = Ewma}) ->
 %% on whether the failure threshold has been crossed.
 %% @end
 %%--------------------------------------------------------------------
--spec(is_open(Now :: integer(), _BackendTracking :: #backend_tracking{}) -> boolean()).
-is_open(_Now, #backend_tracking{consecutive_failures = Failures,
-                          max_failure_threshold = Threshold}) when Failures < Threshold ->
+-spec(is_open(Now :: integer(), _Backend :: #backend{}) -> boolean()).
+is_open(_Now, #backend{consecutive_failures = Failures,
+                       max_failure_threshold = Threshold}) when Failures < Threshold ->
   true;
-is_open(Now, #backend_tracking{last_failure_time = Last,
-                          failure_backoff = Backoff}) ->
+is_open(Now, #backend{last_failure_time = Last,
+                      failure_backoff = Backoff}) ->
   (Now - Last) > Backoff.
 
--spec(is_open(BackendTracking :: #backend_tracking{}) -> boolean()).
-is_open(BackendTracking) ->
+-spec(is_open(Backend :: #backend{}) -> boolean()).
+is_open(Backend) ->
   Now = erlang:monotonic_time(),
-  is_open(Now, BackendTracking).
+  is_open(Now, Backend).
 
 
 %%--------------------------------------------------------------------
@@ -319,82 +315,18 @@ is_open(BackendTracking) ->
 %% Records failure and success statistics for a backend.
 %% @end
 %%--------------------------------------------------------------------
--spec(track_success(boolean(), BT :: #backend_tracking{}) -> #backend_tracking{}).
-track_success(true, BT = #backend_tracking{total_successes = TotalSuccesses}) ->
-  BT#backend_tracking{total_successes = TotalSuccesses + 1,
-    consecutive_failures = 0};
-track_success(false, BT = #backend_tracking{total_failures = TotalFailures,
-  consecutive_failures = ConsecutiveFailures}) ->
+-spec(track_success(boolean(), B :: #backend{}) -> #backend{}).
+track_success(true, Backend = #backend{total_successes = TotalSuccesses}) ->
+  Backend#backend{total_successes = TotalSuccesses + 1,
+                  consecutive_failures = 0};
+track_success(false, Backend = #backend{total_failures = TotalFailures,
+                                        consecutive_failures = ConsecutiveFailures}) ->
   Now = erlang:monotonic_time(nano_seconds),
-  BT#backend_tracking{total_failures = TotalFailures + 1,
-    consecutive_failures = ConsecutiveFailures + 1,
-    last_failure_time = Now};
-track_success(no_success_change, BT) ->
-  BT.
-
-
--spec(increment_pending(#ewma{}) -> #ewma{pending :: non_neg_integer()}).
-increment_pending(Ewma = #ewma{pending = Pending}) ->
-  Ewma#ewma{pending = Pending + 1}.
-
--spec(decrement_pending(atom(), #ewma{}) -> #ewma{pending :: non_neg_integer()}).
-decrement_pending(no_success_change, Ewma) ->
-  Ewma;
-decrement_pending(_Success, Ewma = #ewma{pending = Pending}) when Pending > 0 ->
-  Ewma#ewma{pending = Pending - 1};
-decrement_pending(_, Ewma) ->
-  lager:warning("Call to decrement connections for backend when pending connections == 0"),
-  Ewma.
-
-
-pick_backend_internal(BackendAddrs) when length(BackendAddrs) > ?BACKEND_LIMIT ->
-  minuteman_metrics:update([probabilistic_backend_picker], 1, spiral),
-  Now = erlang:monotonic_time(),
-  ReachabilityCache = reachability_cache(),
-  Choice = probabilistic_backend_chooser(Now, ReachabilityCache, BackendAddrs, [], [], []),
-  {ok, Choice};
-
-
-pick_backend_internal(BackendAddrs) ->
-  minuteman_metrics:update([simple_backend_picker], 1, spiral),
-  %% Pull backends out of ets.
-  Now = erlang:monotonic_time(),
-  Backends = [get_ewma_or_default(Backend) || Backend <- BackendAddrs],
-
-  {Up, Down} = lists:partition(fun (#backend{tracking = Tracking}) ->
-    is_open(Now, Tracking)
-                               end, Backends),
-
-  % If there are no backends up, may as well try one that's down.
-  Choices = case Up of
-              [] ->
-                Down;
-              _ ->
-                Up
-            end,
-  Tree = tree(),
-  {ReachableTrue, ReachableFalse} = lists:partition(
-    fun(Backend) ->
-      {IP, _Port} = Backend#backend.ip_port,
-      is_reachable_real(IP, Tree)
-    end,
-    Choices),
-
-  % If there's only one choice, use it.  Otherwise, try to get two
-  % different random selections and pick the one with the better
-  % cost.
-  case Choices of
-    [Choice] ->
-      {ok, Choice};
-    _ ->
-      %% We know there must be at least two backends
-      {Backend1, ReachableTrue1, ReachableFalse1} =
-        choose_from_backends(ReachableTrue, ReachableFalse),
-      {Backend2, _, _} =
-        choose_from_backends(ReachableTrue1, ReachableFalse1),
-      Choice = choose_backend_by_cost(Backend1, Backend2),
-      {ok, Choice}
-  end.
+  Backend#backend{total_failures = TotalFailures + 1,
+                  consecutive_failures = ConsecutiveFailures + 1,
+                  last_failure_time = Now};
+track_success(no_success_change, Backend) ->
+  Backend.
 
 
 -spec(choose_from_backends(ReachableBackends :: [#backend{}], NotReachableBackends :: [#backend{}]) ->
@@ -441,11 +373,10 @@ probabilistic_backend_chooser(_Now, _ReachabilityCache, RemainingBackendAddrs, R
 probabilistic_backend_chooser(Now, ReachabilityCache, RemainingBackendAddrs, ReachableAndOpenBackends,
   OpenBackends, OtherBackends) when length(RemainingBackendAddrs) > 0 ->
   {RemainingBackendAddrs1, Item} = pop_item_from_list(RemainingBackendAddrs),
-  Backend = get_ewma_or_default(Item),
-  Tracking = Backend#backend.tracking,
+  Backend = get_backend_or_default(Item),
   {IP, _Port} = Backend#backend.ip_port,
   {ReachabilityCache1, Reachable} = is_reachable(ReachabilityCache, IP),
-  IsOpen = is_open(Now, Tracking),
+  IsOpen = is_open(Now, Backend),
   %% We have three lists of nodes:
   %% 1. Nodes that are Reachable + Open (EWMA)
   %% 2. Nodes that are open
@@ -545,8 +476,8 @@ is_reachable_real(IP, Tree) ->
   Nodenames = minuteman_lashup_index:nodenames(IP),
   lists:any(fun(Node) -> lashup_gm_route:distance(Node, Tree) =/= infinity end, Nodenames).
 
-get_ewma_or_default({IP, Port}) ->
-  case ets:lookup(connection_ewma, {IP, Port}) of
+get_backend_or_default({IP, Port}) ->
+  case ets:lookup(backend_connections, {IP, Port}) of
     [ExistingBackend] ->
       ExistingBackend;
     [] ->
@@ -575,82 +506,6 @@ stop() ->
 
 proper_test() ->
   [] = proper:module(?MODULE).
-
-
-%% Properties of EWMA:
-%%  * weight increases with pending
-%%  * when new or completely cold, has a high cost
-%%  * cost drops with low observations
-%%  * cost rises with high observations
-
-ewma() ->
-  ?LET({Cost, Pending},
-       {non_neg_integer(), pos_integer()},
-       #ewma{cost = Cost, pending = Pending}).
-
-prop_ewma_cost_increases_with_pending() ->
-  ?FORALL({Higher, Lower, Ewma},
-          ?SUCHTHAT({Higher, Lower, _Ewma},
-                    {non_neg_integer(), non_neg_integer(), ewma()},
-                    Higher > Lower),
-          ewma_cost_increases_with_pending(Higher, Lower, Ewma)).
-
-ewma_cost_increases_with_pending(Higher, Lower, Ewma) ->
-  Now = erlang:monotonic_time(nano_seconds),
-  [BackendA, BackendB] = lists:map(fun (I) ->
-                                       #backend{ewma = Ewma#ewma{pending = I},
-                                                ip_port = {{0, 0, 0, 0}, 0},
-                                                clock = fun () -> Now end}
-                                   end, [Higher, Lower]),
-  %% We use inclusive bounds on both ends because large numbers
-  %% (penalty is 1.0e307) will compare like this:
-  %%    > 1.0e307 + 1 =:= 1.0e307.
-  %%    true
-  cost(BackendA) >= cost(BackendB).
-
-prop_ewma_cost_decreases_with_time() ->
-  ?FORALL({Higher, Lower, Ewma},
-          ?SUCHTHAT({Higher, Lower, _Ewma},
-                    {non_neg_integer(), non_neg_integer(), ewma()},
-                    Higher > Lower),
-          ewma_cost_decreases_with_time(Higher, Lower, Ewma)).
-
-ewma_cost_decreases_with_time(Higher, Lower, Ewma) ->
-  [BackendA, BackendB] = lists:map(fun (I) ->
-                                       #backend{ewma = Ewma,
-                                                ip_port = {{0, 0, 0, 0}, 0},
-                                                clock = fun () -> I end}
-                                   end, [Higher, Lower]),
-  cost(BackendA) =< cost(BackendB).
-
-prop_ewma_cost_decreases_with_low_measurements() ->
-  ?FORALL(Ewma, ewma(), ewma_cost_decreases_with_low_measurements(Ewma)).
-
-ewma_cost_decreases_with_low_measurements(Ewma) ->
-  Backend = #backend{ewma = Ewma, ip_port = {{0, 0, 0, 0}, 0}},
-  Clock = Backend#backend.clock,
-  Initial = cost(Backend),
-  Later = lists:foldl(fun (_E, AccIn) ->
-                          observe_internal(0, Clock(), AccIn)
-                      end,
-                      Ewma,
-                      lists:seq(1, 10)),
-  cost(#backend{ewma = Later, ip_port = {{0, 0, 0, 0}, 0}}) =< Initial.
-
-prop_ewma_cost_increases_with_high_measurements() ->
-  ?FORALL(Ewma, ewma(), ewma_cost_increases_with_high_measurements(Ewma)).
-
-ewma_cost_increases_with_high_measurements(InitialEwma) ->
-  Ewma = InitialEwma#ewma{penalty = 0},
-  Backend = #backend{ewma = Ewma, ip_port = {{0, 0, 0, 0}, 0}},
-  Clock = Backend#backend.clock,
-  Initial = cost(Backend),
-  Higher = lists:foldl(fun (_E, AccIn) ->
-                          observe_internal(2.0e9, Clock(), AccIn)
-                      end,
-                      Ewma,
-                      lists:seq(1, 10)),
-  cost(#backend{ewma = Higher, ip_port = {{0, 0, 0, 0}, 0}}) > Initial.
 
 initial_state() ->
   #test_state{}.
@@ -683,9 +538,9 @@ pick_backend_postcondition(_, _) ->
   false.
 
 
-next_state(#test_state{known_vips = KnownVips}, _V, {call, _, observe, [_Measurement, Vip, _Success]}) ->
+next_state(#test_state{known_vips = KnownVips}, _V, {call, _, decr_pending, [Vip, _Success]}) ->
   #test_state{known_vips = sets:add_element(Vip, KnownVips)};
-next_state(#test_state{known_vips = KnownVips}, _V, {call, _, set_pending, [Vip]}) ->
+next_state(#test_state{known_vips = KnownVips}, _V, {call, _, incr_pending, [Vip]}) ->
   #test_state{known_vips = sets:add_element(Vip, KnownVips)};
 next_state(S, _V, {call, _, pick_backend, [_Vips]}) ->
   S;
@@ -712,19 +567,18 @@ boolean_or_no_success() ->
 command(S) ->
   Vips = sets:to_list(S#test_state.known_vips),
   VipsPresent = (Vips =/= []),
-  oneof([{call, ?MODULE, observe, [float(), ip_port(), boolean_or_no_success()]},
-         {call, ?MODULE, set_pending, [ip_port()]}] ++
+  oneof([{call, ?MODULE, decr_pending, [ip_port(), boolean_or_no_success()]},
+         {call, ?MODULE, incr_pending, [ip_port()]}] ++
         [{call, ?MODULE, pick_backend, [list(oneof(Vips))]} || VipsPresent]).
 
 state_test() ->
   TestTuple = {{1, 2, 3, 4}, 5000},
   {ok, State} = init([]),
-  ?assertEqual([], ets:lookup(connection_ewma, TestTuple)),
-  {noreply, State} = handle_cast({set_pending, TestTuple}, State),
-  ?assertNotEqual([], ets:lookup(connection_ewma, TestTuple)),
-  Backend = get_ewma_or_default(TestTuple),
-  EWMA = Backend#backend.ewma,
-  ?assertEqual(1, EWMA#ewma.pending),
-  ets:delete(connection_ewma).
+  ?assertEqual([], ets:lookup(backend_connections, TestTuple)),
+  {noreply, State} = handle_cast({incr_pending, TestTuple}, State),
+  ?assertNotEqual([], ets:lookup(backend_connections, TestTuple)),
+  Backend = get_backend_or_default(TestTuple),
+  ?assertEqual(1, Backend#backend.pending),
+  ets:delete(backend_connections).
 
 -endif.

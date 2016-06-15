@@ -53,7 +53,7 @@ init([]) ->
     ?CHILD(minuteman_ct_sup, supervisor),
     ?CHILD(minuteman_iface_server, worker),
     ?CHILD(minuteman_routes, worker),
-    ?CHILD(minuteman_ewma, worker),
+    ?CHILD(minuteman_lb, worker),
     ?CHILD(minuteman_ct_latency_observer, worker),
     ?CHILD(minuteman_worker_sup, supervisor),
     ?CHILD(minuteman_nfq_sup, supervisor)
