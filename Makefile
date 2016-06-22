@@ -46,6 +46,9 @@ ct:
 rel:
 		./rebar3 as prod release
 
+rel-ee:
+		./rebar3 as enterprise release
+
 stage:
 		./rebar3 release
 
