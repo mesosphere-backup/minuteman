@@ -11,7 +11,7 @@
 -author("Tyler Neely").
 
 %% API
--export([master_uri/0,
+-export([
   agent_poll_interval/0,
   queue/0,
   networking/0,
@@ -24,10 +24,6 @@
   agent_polling_enabled/0,
   agent_port/0
   ]).
-
-
-master_uri() ->
-  application:get_env(minuteman, master_uri, "http://localhost:5050/state.json").
 
 
 agent_poll_interval() ->
