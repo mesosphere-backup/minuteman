@@ -31,7 +31,7 @@ master_uri() ->
 
 
 agent_poll_interval() ->
-  application:get_env(minuteman, agent_poll_interval, 500).
+  application:get_env(minuteman, agent_poll_interval, 2000).
 
 tcp_connect_threshold() ->
   application:get_env(minuteman, tcp_connect_threshold, 400).
