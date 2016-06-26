@@ -31,4 +31,8 @@ else
 fi
 NAME=minuteman@${IP}
 RELNAME="`dirname \"$0\"`"/minuteman
+
+## If ERLANG_DISTRIBUTION is unset, then set it to inet_tcp
+ERLANG_DISTRIBUTION=${ERLANG_DISTRIBUTION:=inet_tcp}
+
 NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@
