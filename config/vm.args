@@ -50,4 +50,7 @@
 -ssl_dist_opt server_fail_if_no_peer_cert true
 -ssl_dist_opt server_depth 10
 
+## Enable mesos_state SSL (or not)
+-mesos_state ssl ${MESOS_STATE_SSL_ENABLED}
+
 # This file MUST have extra new lines at the end
