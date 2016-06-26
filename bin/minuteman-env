@@ -34,6 +34,18 @@ RELNAME="`dirname \"$0\"`"/minuteman
 
 ## If ERLANG_DISTRIBUTION is unset, then set it to inet_tcp
 ERLANG_DISTRIBUTION=${ERLANG_DISTRIBUTION:=inet_tcp}
+CLIENT_CACERTFILE=${CLIENT_CACERTFILE:=/run/dcos/pki/CA/certs/ca.crt}
+CLIENT_KEYFILE=${CLIENT_KEYFILE:=/run/dcos/pki/tls/private/minuteman.key}
+CLIENT_CERTFILE=${CLIENT_CERTFILE:=/run/dcos/pki/tls/certs/minuteman.crt}
+CLIENT_VERIFY=${CLIENT_VERIFY:=verify_peer}
+CLIENT_DEPTH=${CLIENT_DEPTH:=10}
+SERVER_CACERTFILE=${SERVER_CACERTFILE:=/run/dcos/pki/CA/certs/ca.crt}
+SERVER_KEYFILE=${SERVER_KEYFILE:=/run/dcos/pki/tls/private/minuteman.key}
+SERVER_CERTFILE=${SERVER_CERTFILE:=/run/dcos/pki/tls/certs/minuteman.crt}
+SERVER_VERIFY=${SERVER_VERIFY:=verify_peer}
+SERVER_FAIL_IF_NO_PEER_CERT=${SERVER_FAIL_IF_NO_PEER_CERT:=true}
+SERVER_DEPTH=${SERVER_DEPTH:=10}
+
 
 ## By default MESOS_STATE_SSL_ENABLED is false
 MESOS_STATE_SSL_ENABLED=${MESOS_STATE_SSL_ENABLED:=false}
