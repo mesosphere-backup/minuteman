@@ -84,5 +84,8 @@ export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_verify ${SERVER_VERIFY}"
 export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_fail_if_no_peer_cert ${SERVER_FAIL_IF_NO_PEER_CERT}"
 export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_depth ${SERVER_DEPTH}"
 
+## Mesos state config (SSL)
+export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED}"
+
 
 NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@

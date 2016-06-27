@@ -33,7 +33,5 @@
 # Scheduler modifications.
 -stbt nnts
 
-## Enable mesos_state SSL (or not)
--mesos_state ssl ${MESOS_STATE_SSL_ENABLED}
 
 # This file MUST have extra new lines at the end
