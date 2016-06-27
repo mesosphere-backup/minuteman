@@ -1,5 +1,7 @@
 #!/bin/bash
 
+APP_NAME=minuteman
+
 function valid_ip()
 {
     local  ip=$1
@@ -17,6 +19,11 @@ function valid_ip()
     return $stat
 }
 
+ENV_FILE="/opt/mesosphere/etc/${APP_NAME}.env"
+if [ -f $ENV_FILE ]; then
+  . $ENV_FILE
+fi
+
 ## Try to ascertain the node IP based on some set of heuristics
 IP=127.0.0.1
 if [ -x /opt/mesosphere/bin/detect_ip ]; then
@@ -29,17 +36,17 @@ if [ -x /opt/mesosphere/bin/detect_ip ]; then
 else
     IP=$(ip r g 192.88.99.0 | grep -Po 'src \K[\d.]+')
 fi
-NAME=minuteman@${IP}
-RELNAME="`dirname \"$0\"`"/minuteman
+NAME=${APP_NAME}@${IP}
+RELNAME="`dirname \"$0\"`"/${APP_NAME}
 
 ## If ERLANG_DISTRIBUTION is unset, then set it to inet_tcp
 ERLANG_DISTRIBUTION=${ERLANG_DISTRIBUTION:=inet_tcp}
 export ERLANG_DISTRIBUTION
 CLIENT_CACERTFILE=${CLIENT_CACERTFILE:=/run/dcos/pki/CA/certs/ca.crt}
 export CLIENT_CACERTFILE
-CLIENT_KEYFILE=${CLIENT_KEYFILE:=/run/dcos/pki/tls/private/minuteman.key}
+CLIENT_KEYFILE=${CLIENT_KEYFILE:=/run/dcos/pki/tls/private/${APP_NAME}.key}
 export CLIENT_KEYFILE
-CLIENT_CERTFILE=${CLIENT_CERTFILE:=/run/dcos/pki/tls/certs/minuteman.crt}
+CLIENT_CERTFILE=${CLIENT_CERTFILE:=/run/dcos/pki/tls/certs/${APP_NAME}.crt}
 export CLIENT_CERTFILE
 CLIENT_VERIFY=${CLIENT_VERIFY:=verify_peer}
 export CLIENT_VERIFY
@@ -47,9 +54,9 @@ CLIENT_DEPTH=${CLIENT_DEPTH:=10}
 export CLIENT_DEPTH
 SERVER_CACERTFILE=${SERVER_CACERTFILE:=/run/dcos/pki/CA/certs/ca.crt}
 export SERVER_CACERTFILE
-SERVER_KEYFILE=${SERVER_KEYFILE:=/run/dcos/pki/tls/private/minuteman.key}
+SERVER_KEYFILE=${SERVER_KEYFILE:=/run/dcos/pki/tls/private/${APP_NAME}.key}
 export SERVER_KEYFILE
-SERVER_CERTFILE=${SERVER_CERTFILE:=/run/dcos/pki/tls/certs/minuteman.crt}
+SERVER_CERTFILE=${SERVER_CERTFILE:=/run/dcos/pki/tls/certs/${APP_NAME}.crt}
 export SERVER_CERTFILE
 SERVER_VERIFY=${SERVER_VERIFY:=verify_peer}
 export SERVER_VERIFY
@@ -62,5 +69,20 @@ export SERVER_DEPTH
 ## By default MESOS_STATE_SSL_ENABLED is false
 MESOS_STATE_SSL_ENABLED=${MESOS_STATE_SSL_ENABLED:=false}
 export MESOS_STATE_SSL_ENABLED
+
+## SSL / Distributed Erlang config
+export ERL_FLAGS="${ERL_FLAGS} -proto_dist ${ERLANG_DISTRIBUTION}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt client_cacertfile ${CLIENT_CACERTFILE}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt client_keyfile ${CLIENT_KEYFILE}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt client_certfile ${CLIENT_CERTFILE}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt client_verify ${CLIENT_VERIFY}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt client_depth ${CLIENT_DEPTH}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_cacertfile ${SERVER_CACERTFILE}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_keyfile ${SERVER_KEYFILE}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_certfile ${SERVER_CERTFILE}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_verify ${SERVER_VERIFY}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_fail_if_no_peer_cert ${SERVER_FAIL_IF_NO_PEER_CERT}"
+export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_depth ${SERVER_DEPTH}"
+
 
 NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@

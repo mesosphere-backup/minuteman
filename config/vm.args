@@ -33,24 +33,6 @@
 # Scheduler modifications.
 -stbt nnts
 
-## SSL / Distributed Erlang config
--proto_dist ${ERLANG_DISTRIBUTION}
-
-## These are set to this for now, but they are only picked up if someone sets the distribution mode to inet_tls
-## (i.e. these variables are side-effect free, unless ERLANG_DISTRIBUTION = inet_tls
--ssl_dist_opt client_cacertfile ${CLIENT_CACERTFILE}
--ssl_dist_opt client_keyfile ${CLIENT_KEYFILE}
--ssl_dist_opt client_certfile ${CLIENT_CERTFILE}
--ssl_dist_opt client_verify ${CLIENT_VERIFY}
--ssl_dist_opt client_depth ${CLIENT_DEPTH}
--ssl_dist_opt server_cacertfile ${SERVER_CACERTFILE}
--ssl_dist_opt server_keyfile ${SERVER_KEYFILE}
--ssl_dist_opt server_certfile ${SERVER_CERTFILE}
--ssl_dist_opt server_verify ${SERVER_VERIFY}
--ssl_dist_opt server_fail_if_no_peer_cert ${SERVER_FAIL_IF_NO_PEER_CERT}
--ssl_dist_opt server_depth ${SERVER_DEPTH}
-
-
 ## Enable mesos_state SSL (or not)
 -mesos_state ssl ${MESOS_STATE_SSL_ENABLED}
 
