@@ -26,7 +26,7 @@ packageclean:
 ## Test targets
 ##
 
-check: test xref dialyzer
+check: test xref dialyzer cover
 
 test: ct eunit
 
@@ -39,15 +39,15 @@ eunit:
 ct:
 	./rebar3 as test ct
 
+cover:
+	./rebar3 as test cover
+
 ##
 ## Release targets
 ##
 
 rel:
 		./rebar3 as prod release
-
-rel-ee:
-		./rebar3 as enterprise release
 
 stage:
 		./rebar3 release
