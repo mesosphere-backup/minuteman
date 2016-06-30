@@ -70,6 +70,12 @@ export SERVER_DEPTH
 MESOS_STATE_SSL_ENABLED=${MESOS_STATE_SSL_ENABLED:=false}
 export MESOS_STATE_SSL_ENABLED
 
+
+## By default only listen on localhost for debug api requests
+MINUTEMAN_DEBUG_API_LISTEN_IP=${MINUTEMAN_DEBUG_API_LISTEN_IP:=127.0.0.1}
+export MINUTEMAN_DEBUG_API_LISTEN_IP
+
+
 ## SSL / Distributed Erlang config
 export ERL_FLAGS="${ERL_FLAGS} -proto_dist ${ERLANG_DISTRIBUTION}"
 export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt client_cacertfile ${CLIENT_CACERTFILE}"
@@ -85,7 +91,8 @@ export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_fail_if_no_peer_cert ${SERVE
 export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_depth ${SERVER_DEPTH}"
 
 ## Mesos state config (SSL)
-export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED}"
+export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED} \
+                               -minuteman api_listen_ip ${MINUTEMAN_DEBUG_API_LISTEN_IP}"
 
 
 NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@
