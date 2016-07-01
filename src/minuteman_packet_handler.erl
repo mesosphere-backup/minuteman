@@ -128,7 +128,7 @@ local_to_foreign() ->
   meck:new(minuteman_iface_server),
   meck:expect(minuteman_iface_server, is_local, fun is_local/1),
   meck:expect(minuteman_routes, get_route, fun({8, 8, 8, 8}) -> {ok, [{prefsrc, {9, 9, 9, 9}}]} end),
-  minuteman_ewma:start_link(),
+  minuteman_lb:start_link(),
 
   Payload = <<>>,
   TCP = #tcp{sport = 55000, dport = 1000},
@@ -146,7 +146,7 @@ local_to_foreign() ->
   ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
   meck:unload(),
   gen_server:call(minuteman_vip_server, stop),
-  gen_server:call(minuteman_ewma, stop).
+  gen_server:call(minuteman_lb, stop).
 
 
 foreign_to_foreign_test() ->
@@ -160,7 +160,7 @@ foreign_to_foreign_test() ->
   Backend = {{8, 8, 8, 8}, 31421},
   VIPs = orddict:store(VIP, [Backend], []),
   minuteman_vip_server:push_vips(VIPs),
-  {ok, _} = minuteman_ewma:start_link(),
+  {ok, _} = minuteman_lb:start_link(),
   {ok, TreePid} = lashup_gm_route:start_link(),
   unlink(TreePid),
 
@@ -179,7 +179,7 @@ foreign_to_foreign_test() ->
   ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
   meck:unload(),
   ok = gen_server:call(minuteman_vip_server, stop),
-  ok = gen_server:call(minuteman_ewma, stop),
+  ok = gen_server:call(minuteman_lb, stop),
   gen_server:stop(TreePid, shutdown, 5000).
 
 -endif.
