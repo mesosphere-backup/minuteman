@@ -466,36 +466,24 @@ zone_test() ->
     Zone = zone(1463878088, Components, State),
 
     Expected = {<<"l4lb.thisdcos.directory">>,
-        <<146, 243, 41, 235, 14, 114, 224, 170, 243, 14, 90, 250, 173, 146, 23, 42,
-            254, 111, 132, 248>>, %% SHA1 hash of zone
-        [#dns_rr{name = <<"foo4.marathon.l4lb.thisdcos.directory">>, class = 1,
-            type = 1, ttl = 5,
-            data = #dns_rrdata_a{ip = {11, 0, 0, 86}}},
-            #dns_rr{name = <<"foo3.marathon.l4lb.thisdcos.directory">>, class = 1,
-                type = 1, ttl = 5,
-                data = #dns_rrdata_a{ip = {11, 0, 0, 0}}},
-            #dns_rr{name = <<"foo2.marathon.l4lb.thisdcos.directory">>, class = 1,
-                type = 1, ttl = 5,
-                data = #dns_rrdata_a{ip = {11, 0, 0, 108}}},
-            #dns_rr{name = <<"foo1.marathon.l4lb.thisdcos.directory">>, class = 1,
-                type = 1, ttl = 5,
-                data = #dns_rrdata_a{ip = {11, 0, 0, 36}}},
-            #dns_rr{name = <<"l4lb.thisdcos.directory">>, class = 1, type = 6, ttl = 3600,
-                data = #dns_rrdata_soa{mname = <<"ns.l4lb.thisdcos.directory">>,
-                    rname = <<"support.mesosphere.com">>,
-                    serial = 1463878088, refresh = 60, retry = 180,
-                    expire = 86400, minimum = 1}},
-            #dns_rr{name = <<"l4lb.thisdcos.directory">>, class = 1, type = 2, ttl = 3600,
-                data = #dns_rrdata_ns{dname = <<"ns.l4lb.thisdcos.directory">>}},
-            #dns_rr{name = <<"ns.l4lb.thisdcos.directory">>, class = 1, type = 1,
-                ttl = 3600,
-                data = #dns_rrdata_a{ip = {198, 51, 100, 1}}}
-        ]},
+        <<161, 204, 13, 14, 64, 13, 80, 62, 140, 205, 206, 161, 238, 57, 215,
+            246, 172, 97, 183, 176>>,
+        [{dns_rr, <<"foo4.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+            {dns_rrdata_a, {11, 0, 0, 86}}},
+            {dns_rr, <<"foo3.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+                {dns_rrdata_a, {11, 0, 0, 0}}},
+            {dns_rr, <<"foo2.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+                {dns_rrdata_a, {11, 0, 0, 108}}},
+            {dns_rr, <<"foo1.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+                {dns_rrdata_a, {11, 0, 0, 36}}},
+            {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 6, 5,
+                {dns_rrdata_soa, <<"ns.l4lb.thisdcos.directory">>,
+                    <<"support.mesosphere.com">>, 1463878088, 5, 5, 5, 1}},
+            {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 2, 3600,
+                {dns_rrdata_ns, <<"ns.l4lb.thisdcos.directory">>}},
+            {dns_rr, <<"ns.l4lb.thisdcos.directory">>, 1, 1, 3600,
+                {dns_rrdata_a, {198, 51, 100, 1}}}]},
     ?assertEqual(Expected, Zone).
-
-
-
-
 
 overallocate_test() ->
     State0 = #state{ref = undefined},
