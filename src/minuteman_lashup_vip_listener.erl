@@ -258,14 +258,14 @@ zone(Now, ZoneComponents, _State = #state{name_to_ip_port = NameIPPort}) ->
         #dns_rr{
             name = ZoneName,
             type = ?DNS_TYPE_SOA,
-            ttl = 3600,
+            ttl = 5,
             data = #dns_rrdata_soa{
                 mname = binary_to_name([<<"ns">>|ZoneComponents]), %% Nameserver
                 rname = <<"support.mesosphere.com">>,
                 serial = Now, %% Hopefully there is not more than 1 update/sec :)
-                refresh = 60,
-                retry = 180,
-                expire = 86400,
+                refresh = 5,
+                retry = 5,
+                expire = 5,
                 minimum = 1
             }
         },
