@@ -60,7 +60,7 @@
 -spec(get_route(Addr :: inet:ip4_address()) -> {ok, Route :: route()} | {error, Reason :: term()}).
 get_route(Addr) when is_tuple(Addr) ->
   Now = erlang:monotonic_time(seconds),
-  Multiplier = 1 + random:uniform(),
+  Multiplier = 1 + rand:uniform(),
   RCRandomizer = ?ROUTE_CACHE_TIME_SECONDS * Multiplier,
   case ets:lookup(?MODULE, Addr) of
     [#route_cache{timestamp = Timestamp, route = Route}] when (Now - Timestamp) < RCRandomizer ->

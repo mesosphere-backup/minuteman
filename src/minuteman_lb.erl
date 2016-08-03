@@ -168,9 +168,6 @@ start_link() ->
   {stop, Reason :: term()} | ignore).
 init([]) ->
   process_flag(min_heap_size, 2000000),
-  random:seed(erlang:phash2([node()]),
-              erlang:monotonic_time(),
-              erlang:unique_integer()),
   backend_connections = ets:new(backend_connections,
                                 [set, {keypos, #backend.ip_port}, named_table, {read_concurrency, true}]),
   {ok, #state{}}.
@@ -342,7 +339,7 @@ choose_from_backends(B1, B2) when length(B2) > 0 ->
 -spec(pop_item_from_list(List :: [term()]) -> {ListPrime :: [term()], Item :: term()}).
 pop_item_from_list(List) ->
   Size = length(List),
-  Idx = random:uniform(Size),
+  Idx = rand:uniform(Size),
   Item = lists:nth(Idx, List),
   {L1, [_|L2]} = lists:split(Idx-1, List),
   ListPrime = L1 ++ L2,
