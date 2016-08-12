@@ -487,32 +487,6 @@ notify_metrics(_, _Backend) ->
 
 
 -ifdef(TEST).
-
-
-ip() ->
-  ?LET({I1, I2, I3, I4},
-       {integer(0, 255), integer(0, 255), integer(0, 255), integer(0, 255)},
-       {I1, I2, I3, I4}).
-
-ip_port() ->
-  ?LET({IP, Port},
-       {ip(), integer(0, 65535)},
-       {IP, Port}).
-
-boolean_or_no_success() ->
-  ?LET(I, integer(0, 2), case I of
-                           0 -> true;
-                           1 -> false;
-                           2 -> no_success_change
-                         end).
-
-command(S) ->
-  Vips = sets:to_list(S#test_state.known_vips),
-  VipsPresent = (Vips =/= []),
-  oneof([{call, ?MODULE, decr_pending, [ip_port(), boolean_or_no_success()]},
-         {call, ?MODULE, incr_pending, [ip_port()]}] ++
-        [{call, ?MODULE, pick_backend, [list(oneof(Vips))]} || VipsPresent]).
-
 state_test() ->
   TestTuple = {{1, 2, 3, 4}, 5000},
   {ok, State} = init([]),
