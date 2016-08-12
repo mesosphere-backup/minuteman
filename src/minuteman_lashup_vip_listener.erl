@@ -43,27 +43,23 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
+
+-type ip4_num() :: 0..16#ffffffff.
 -record(state, {
     ref = erlang:error() :: reference(),
-    allocated_ip_ports = gb_sets:empty() :: gb_sets:set(port_ip()),
-    name_to_ip_port = gb_trees:empty() :: gb_trees:tree(named_vip(), inet:ip4_address())
-
-}).
--type vip_name() :: binary().
--type named_vip() :: {{vip_name(), framework_name()}, inet:port_number()}.
+    min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
+    max_ip_num = erlang:error(no_max_ip_num) :: ip4_num(),
+    name_to_ip = ets:new(name_to_ip, []) :: ets:tid(),
+    ip_to_name = ets:new(name_to_ip, []) :: ets:tid()
+    }).
 -type state() :: #state{}.
--type port_ip() :: {inet:port_number(), inet:ip4_address()}.
+
+-type ip_vip() :: {tcp, inet:ip4_address(), inet:port_number()}.
+-type vip_name() :: binary().
+-type named_vip() :: {tcp, {name, {vip_name(), framework_name()}}, inet:port_number()}.
+-type vip() :: {ip_vip() | named_vip(), [ip_port()]}.
 
 
--define(MIN_IP, {11, 0, 0, 0}).
--define(MIN_INT_IP, 16#0b000000).
--ifdef(TEST).
--define(MAX_IP, {11, 0, 0, 254}).
--define(MAX_INT_IP, 16#0b0000fe).
--else.
--define(MAX_IP, {11, 255, 255, 254}).
--define(MAX_INT_IP, 16#0bfffffe).
--endif.
 
 
 %%%===================================================================
@@ -100,8 +96,12 @@ start_link() ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
+    MinIP = ip_to_integer(minuteman_config:min_named_ip()),
+    MaxIP = ip_to_integer(minuteman_config:max_named_ip()),
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?VIPS_KEY}) -> true end)),
-    {ok, #state{ref = Ref}}.
+    State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP},
+    lager:warning("State: ~p", [State]),
+    {ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -192,12 +192,40 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-handle_event(_Event = #{value := VIPs0}, State0) ->
+handle_event(_Event = #{value := VIPs}, State) ->
+    handle_value(VIPs, State).
+
+handle_value(VIPs0, State) ->
+    VIPs1 = process_vips(VIPs0, State),
+    push_state_to_spartan(State),
+    minuteman_vip_events:push_vips(VIPs1),
+    State.
+
+process_vips(VIPs0, State) ->
     VIPs1 = lists:map(fun rewrite_keys/1, VIPs0),
-    {Vips2, State1} = process_vips(VIPs1, State0),
-    push_state_to_spartan(State1),
-    minuteman_vip_events:push_vips(Vips2),
-    State1.
+    rebind_names(VIPs1, State).
+
+
+rewrite_keys({{RealKey, riak_dt_orswot}, Value}) ->
+    {RealKey, Value}.
+
+%% @doc Extracts name based vips. Binds names
+-spec(rebind_names([vip()], state()) -> [ip_vip()]).
+rebind_names(VIPs0, State) ->
+    Names0 = [Name || {{tcp, {name, Name}, _Portnumber}, _Backends} <- VIPs0],
+    Names1 = lists:map(fun({Name, FWName}) -> binary_to_name([Name, FWName]) end, Names0),
+    Names2 = lists:usort(Names1),
+    update_name_mapping(Names2, State),
+    lists:map(fun(VIP) -> rewrite_name(VIP, State) end, VIPs0).
+
+-spec(rewrite_name(vip(), state()) -> ip_vip()).
+rewrite_name({{tcp, {name, {Name, FWName}}, PortNum}, BEs}, #state{name_to_ip = NTI}) ->
+    FullName = binary_to_name([Name, FWName]),
+    [{_, IPNum}] = ets:lookup(NTI, FullName),
+    IP = integer_to_ip(IPNum),
+    {{tcp, IP, PortNum}, BEs};
+rewrite_name(Else, _State) ->
+    Else.
 
 retry_spartan(State) ->
     push_state_to_spartan(State).
@@ -247,12 +275,11 @@ timeish() ->
         Time when Time > 4294967295 ->
             4294967295;
         Time ->
-            Time
+            Time + erlang:unique_integer([positive, monotonic])
     end.
 
-
 -spec(zone(Now :: 0..4294967295, [binary()], state()) -> {Name :: binary(), Sha :: binary(), [#dns_rr{}]}).
-zone(Now, ZoneComponents, _State = #state{name_to_ip_port = NameIPPort}) ->
+zone(Now, ZoneComponents, _State = #state{name_to_ip = NTI}) ->
     ZoneName = binary_to_name(ZoneComponents),
     Records0 = [
         #dns_rr{
@@ -286,33 +313,20 @@ zone(Now, ZoneComponents, _State = #state{name_to_ip_port = NameIPPort}) ->
             }
         }
     ],
-    {_, Records1} = gb_tree_fold(fun add_records_fold/3, {ZoneComponents, Records0}, NameIPPort),
+    {_, Records1} = ets:foldl(fun add_record_fold/2, {ZoneComponents, Records0}, NTI),
     Sha = crypto:hash(sha, term_to_binary(Records1)),
     {ZoneName, Sha, Records1}.
 
-add_records_fold({{VIPName, FrameworkName}, _Port}, IP, {ZoneComponents, Records0}) ->
+add_record_fold({Name, IPInt}, {ZoneComponents, Records0}) ->
     Record = #dns_rr{
-        name = binary_to_name([VIPName, FrameworkName] ++ ZoneComponents),
+        name = binary_to_name([Name] ++ ZoneComponents),
         type = ?DNS_TYPE_A,
         ttl = 5,
         data = #dns_rrdata_a{
-            ip = IP
+            ip = integer_to_ip(IPInt)
         }
     },
     {ZoneComponents, [Record|Records0]}.
-
-gb_tree_fold(FoldFun, Acc0, Tree) ->
-    Iterator = gb_trees:iterator(Tree),
-    do_gb_tree_fold(FoldFun, Acc0, Iterator).
-
-do_gb_tree_fold(FoldFun, Acc0, Iterator0) ->
-    case gb_trees:next(Iterator0) of
-        none ->
-            Acc0;
-        {Key, Value, Iterator1} ->
-            Acc1 = FoldFun(Key, Value, Acc0),
-            do_gb_tree_fold(FoldFun, Acc1, Iterator1)
-    end.
 
 -spec(binary_to_name([binary()]) -> binary()).
 binary_to_name(Binaries0) ->
@@ -335,169 +349,148 @@ binary_join(Binaries, Sep) ->
         Binaries
     ).
 
-process_vips(VIPs0, State0) ->
-    State1 = discard_old_names(VIPs0, State0),
-    {VIPs1, State2} =
-        lists:foldl(
-            fun remap_name_and_allocate/2,
-            {[], State1},
-            VIPs0
-        ),
-    VIPs2 = lists:usort(VIPs1),
-    {VIPs2, State2}.
-
-
-allocate_vip(Key, NameIPPort0, AllocIPPorts0) ->
-    RangeSize = ?MAX_INT_IP - ?MIN_INT_IP,
-    StartSearch = erlang:phash2(Key, RangeSize),
-
-    allocate_vip(Key, NameIPPort0, AllocIPPorts0, StartSearch, StartSearch + 1, RangeSize).
-
-
-allocate_vip(_, _, _, StartSearch, CurrentOffset, RangeSize) when CurrentOffset rem RangeSize == StartSearch  ->
-    erlang:throw(out_of_ips);
-allocate_vip(VIP = {_VIPKey, PortNumber}, NameIPPort0, AllocIPPorts0, StartSearch, CurrentOffset, RangeSize) ->
-    TryIP = integer_to_ip(?MIN_INT_IP + (CurrentOffset rem RangeSize)),
-    TestIPPort = {PortNumber, TryIP},
-    Iterator = gb_sets:iterator_from(TestIPPort, AllocIPPorts0),
-    case gb_sets:next(Iterator) of
-        {TestIPPort, _} ->
-            allocate_vip(VIP, NameIPPort0, AllocIPPorts0, StartSearch, CurrentOffset + 1, RangeSize);
-        _ ->
-            AllocIPPorts1 = gb_sets:add(TestIPPort, AllocIPPorts0),
-            NameIPPort1 = gb_trees:insert(VIP, TryIP, NameIPPort0),
-            {TestIPPort, NameIPPort1, AllocIPPorts1}
-    end.
-
-remap_name_and_allocate({{Protocol, {name, {VIPName, FrameworkName}}, PortNumber}, Backends},
-        {Acc, State0 = #state{name_to_ip_port = NameIPPort0, allocated_ip_ports = AllocIPPorts0}}) ->
-    Key = {{VIPName, FrameworkName}, PortNumber},
-    case gb_trees:lookup(Key, NameIPPort0) of
-        none ->
-            {{Port, IP}, NameIPPort1, AllocIPPorts1} = allocate_vip(Key, NameIPPort0, AllocIPPorts0),
-            State1 = State0#state{name_to_ip_port = NameIPPort1, allocated_ip_ports = AllocIPPorts1},
-            VIP = {{Protocol, IP, Port}, Backends},
-            {[VIP|Acc], State1};
-        {value, IP} ->
-            VIP = {{Protocol, IP, PortNumber}, Backends},
-            {[VIP|Acc], State0}
-    end;
-remap_name_and_allocate(VIP, {Acc, State}) ->
-    {[VIP|Acc], State}.
-discard_old_names(VIPs, State = #state{name_to_ip_port = NameIPPort0, allocated_ip_ports = AllocIPPorts0}) ->
-    OldNames = old_names(VIPs, State),
-    OldIPPorts = lists:map(
-        fun(Key = {_, Port}) ->
-            IP = gb_trees:get(Key, NameIPPort0),
-            {Port, IP}
-        end,
-        OldNames),
-    NameIPPort1 =
-        lists:foldl(
-            fun gb_trees:delete/2,
-            NameIPPort0,
-            OldNames
-        ),
-    AllocIPPorts1 =
-        lists:foldl(
-            fun gb_sets:delete/2,
-            AllocIPPorts0,
-            OldIPPorts
-        ),
-    State#state{name_to_ip_port = NameIPPort1, allocated_ip_ports = AllocIPPorts1}.
-
-old_names(VIPs, _State = #state{name_to_ip_port = NamedIPPort}) ->
-    NamedVIPs = [VIP || VIP = {{_Protocol, {name, {_VIPName, _FrameworkName}}, _PortNumber}, _Backends} <- VIPs],
-    NamedVIPTreeKeys = [{{VIPName, FrameworkName}, PortNumber} ||
-        {{_Protocol, {name, {VIPName, FrameworkName}}, PortNumber}, _Backends} <- NamedVIPs],
-    % Returns the keys in Tree as an ordered list.
-    CurrentVIPs = gb_trees:keys(NamedIPPort),
-    ordsets:subtract(CurrentVIPs, ordsets:from_list(NamedVIPTreeKeys)).
-
-rewrite_keys({{RealKey, riak_dt_orswot}, Value}) ->
-    {RealKey, Value}.
 
 -spec(integer_to_ip(IntIP :: 0..4294967295) -> inet:ip4_address()).
 integer_to_ip(IntIP) ->
     <<A, B, C, D>> = <<IntIP:32/integer>>,
     {A, B, C, D}.
 
-
--ifdef(TEST).
--define(FAKE_BACKENDS, [backend1, backend2]).
-
 -spec(ip_to_integer(inet:ip4_address()) -> 0..4294967295).
 ip_to_integer(_IP = {A, B, C, D}) ->
     <<IntIP:32/integer>> = <<A, B, C, D>>,
     IntIP.
 
-simple_allocate1_test() ->
-    State0 = #state{ref = undefined},
-    {Out, _State1} = remap_name_and_allocate({{tcp, {name, {<<"foo">>, <<"marathon">>}}, 5000}, ?FAKE_BACKENDS},
-        {[], State0}),
-    ?assertEqual([{{tcp, {11, 0, 0, 106}, 5000}, ?FAKE_BACKENDS}], Out).
+
+-spec(update_name_mapping(Names :: term(), State :: state()) -> ok).
+update_name_mapping(Names, State) ->
+    remove_old_names(Names, State),
+    add_new_names(Names, State),
+    ok.
+
+%% This can be rewritten as an enumeration over the ets table, and the names passed to it.
+remove_old_names(NewNames, State = #state{name_to_ip = NamesToIPTable}) ->
+    OldNames = lists:sort([Name || {Name, _IP} <- ets:tab2list(NamesToIPTable)]),
+    NamesToDelete = ordsets:subtract(OldNames, NewNames),
+    lists:foreach(fun(NameToDelete) -> remove_old_name(NameToDelete, State) end, NamesToDelete).
+
+remove_old_name(NameToDelete, #state{name_to_ip = NamesToIPTable, ip_to_name = IPToNameTable}) ->
+    [{_, IP}] = ets:lookup(NamesToIPTable, NameToDelete),
+    ets:delete(IPToNameTable, IP),
+    ets:delete(NamesToIPTable, NameToDelete).
+
+add_new_names(Names, State) ->
+    lists:foreach(fun(Name) -> maybe_add_new_name(Name, State) end, Names).
+
+maybe_add_new_name(Name, State = #state{name_to_ip = NTI}) ->
+    case ets:lookup(NTI, Name) of
+        [] ->
+            add_new_name(Name, State);
+        _ ->
+            ok
+    end.
+add_new_name(Name, State = #state{min_ip_num = MinIPNum, max_ip_num = MaxIPNum}) ->
+    SearchStart = erlang:phash2(Name, MaxIPNum - MinIPNum),
+    add_new_name(Name, SearchStart + 1, SearchStart, State).
+
+add_new_name(_Name, SearchNext, SearchStart, #state{min_ip_num = MinIPNum, max_ip_num = MaxIPNum}) when
+    SearchNext rem (MaxIPNum - MinIPNum) == SearchStart ->
+    throw(out_of_ips);
+add_new_name(Name, SearchNext, SearchStart,
+        State =
+            #state{ip_to_name = IPToNameTable, min_ip_num = MinIPNum, max_ip_num = MaxIPNum, name_to_ip = NameToIP}) ->
+    ActualIPNum = MinIPNum + (SearchNext rem (MaxIPNum - MinIPNum)),
+    case ets:lookup(IPToNameTable, ActualIPNum) of
+        [] ->
+            ets:insert(NameToIP, {Name, ActualIPNum}),
+            ets:insert(IPToNameTable, {ActualIPNum, Name});
+        _ ->
+            add_new_name(Name, SearchNext + 1, SearchStart, State)
+    end.
 
 
-simple_allocate2_test() ->
-    ExpectedRemap = [{{tcp, {11, 0, 0, 106}, 5000}, ?FAKE_BACKENDS}],
-    State0 = #state{ref = undefined},
-    {Out, State1} = remap_name_and_allocate({{tcp, {name, {<<"foo">>, <<"marathon">>}}, 5000}, ?FAKE_BACKENDS},
-        {[], State0}),
-    ?assertEqual(ExpectedRemap, Out),
-    {Out, State1} = remap_name_and_allocate({{tcp, {name, {<<"foo">>, <<"marathon">>}}, 5000}, ?FAKE_BACKENDS},
-        {[], State1}).
 
-simple_allocate3_test() ->
-    State0 = #state{ref = undefined},
-    %                        {_, S1} = process_vips(VIPs1, S0),
-    FakeVIP1 = {{tcp, {name, {<<"foo1">>, <<"marathon">>}}, 5000}, [foo1]},
-    FakeVIP2 = {{tcp, {name, {<<"foo2">>, <<"marathon">>}}, 5000}, [foo2]},
-    FakeVIP3 = {{tcp, {name, {<<"foo3">>, <<"marathon">>}}, 5000}, [foo3]},
-    FakeVIP4 = {{tcp, {name, {<<"foo4">>, <<"marathon">>}}, 5001}, [foo4]},
-    {V0, State1} = process_vips([FakeVIP1, FakeVIP2, FakeVIP3, FakeVIP4], State0),
-    {V1, State2} = process_vips([FakeVIP1, FakeVIP3, FakeVIP4], State1),
-    {V0, State3} = process_vips([FakeVIP1, FakeVIP2, FakeVIP3, FakeVIP4], State2),
-    ?assertEqual([], V1 -- V0),
-    State3.
+-ifdef(TEST).
+state() ->
+    %% 9/8
+    #state{ref = undefined, min_ip_num = 16#0b000000, max_ip_num = 16#0b0000fe}.
+
+process_vips_test() ->
+    State = state(),
+    VIPs = [
+        {
+            {{tcp, {1, 2, 3, 4}, 80}, riak_dt_orswot},
+            [{{10, 0, 3, 46}, 11778}]
+        },
+        {
+            {{tcp, {name, {<<"/foo">>, <<"marathon">>}}, 80}, riak_dt_orswot},
+            [{{10, 0, 3, 46}, 25458}]
+        }
+    ],
+    Out = process_vips(VIPs, State),
+    Expected = [
+        {{tcp, {1, 2, 3, 4}, 80}, [{{10, 0, 3, 46}, 11778}]},
+        {{tcp, {11, 0, 0, 36}, 80}, [{{10, 0, 3, 46}, 25458}]}
+    ],
+    ?assertEqual(Expected, Out),
+    State.
+
+update_name_mapping_test() ->
+    State0 = #state{name_to_ip = NTI, ip_to_name = ITN} = state(),
+    update_name_mapping([test1, test2, test3], State0),
+    NTIList = [{N, I} || {I, N} <- ets:tab2list(ITN)],
+    ?assertEqual(NTIList, ets:tab2list(NTI)),
+    ?assertEqual([{184549622, test3}, {184549621, test2}, {184549620, test1}], ets:tab2list(ITN)),
+    ?assertEqual([{test3, 184549622}, {test2, 184549621}, {test1, 184549620}], ets:tab2list(NTI)),
+    update_name_mapping([test1, test3], State0),
+    ?assertEqual([{184549622, test3}, {184549620, test1}], ets:tab2list(ITN)),
+    ?assertEqual([{test3, 184549622}, {test1, 184549620}], ets:tab2list(NTI)).
+
 
 zone_test() ->
-    State = simple_allocate3_test(),
+    State = process_vips_test(),
     Components = [<<"l4lb">>, <<"thisdcos">>, <<"directory">>],
     Zone = zone(1463878088, Components, State),
+    Expected =
+        {<<"l4lb.thisdcos.directory">>,
+            <<98, 101, 185, 78, 24, 158, 232, 55, 203, 212, 105, 96, 175, 215, 249, 57, 64, 221, 147, 29>>,
+            [
+                {dns_rr, <<"foo.marathon.l4lb.thisdcos.directory">>, 1, 1, 5, {dns_rrdata_a, {11, 0, 0, 36}}},
+                {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 6, 5,
+                    {dns_rrdata_soa, <<"ns.l4lb.thisdcos.directory">>, <<"support.mesosphere.com">>,
+                        1463878088, 5, 5, 5, 1}
+                },
+                {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 2, 3600, {dns_rrdata_ns, <<"ns.l4lb.thisdcos.directory">>}},
+                {dns_rr, <<"ns.l4lb.thisdcos.directory">>, 1, 1, 3600, {dns_rrdata_a, {198, 51, 100, 1}}}
+            ]
+        },
 
-    Expected = {<<"l4lb.thisdcos.directory">>,
-        <<161, 204, 13, 14, 64, 13, 80, 62, 140, 205, 206, 161, 238, 57, 215,
-            246, 172, 97, 183, 176>>,
-        [{dns_rr, <<"foo4.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
-            {dns_rrdata_a, {11, 0, 0, 86}}},
-            {dns_rr, <<"foo3.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
-                {dns_rrdata_a, {11, 0, 0, 0}}},
-            {dns_rr, <<"foo2.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
-                {dns_rrdata_a, {11, 0, 0, 108}}},
-            {dns_rr, <<"foo1.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
-                {dns_rrdata_a, {11, 0, 0, 36}}},
-            {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 6, 5,
-                {dns_rrdata_soa, <<"ns.l4lb.thisdcos.directory">>,
-                    <<"support.mesosphere.com">>, 1463878088, 5, 5, 5, 1}},
-            {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 2, 3600,
-                {dns_rrdata_ns, <<"ns.l4lb.thisdcos.directory">>}},
-            {dns_rr, <<"ns.l4lb.thisdcos.directory">>, 1, 1, 3600,
-                {dns_rrdata_a, {198, 51, 100, 1}}}]},
     ?assertEqual(Expected, Zone).
-
+%%
+%%    Expected = {<<"l4lb.thisdcos.directory">>,
+%%        <<161, 204, 13, 14, 64, 13, 80, 62, 140, 205, 206, 161, 238, 57, 215,
+%%            246, 172, 97, 183, 176>>,
+%%        [{dns_rr, <<"foo4.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+%%            {dns_rrdata_a, {11, 0, 0, 86}}},
+%%            {dns_rr, <<"foo3.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+%%                {dns_rrdata_a, {11, 0, 0, 0}}},
+%%            {dns_rr, <<"foo2.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+%%                {dns_rrdata_a, {11, 0, 0, 108}}},
+%%            {dns_rr, <<"foo1.marathon.l4lb.thisdcos.directory">>, 1, 1, 5,
+%%                {dns_rrdata_a, {11, 0, 0, 36}}},
+%%            {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 6, 5,
+%%                {dns_rrdata_soa, <<"ns.l4lb.thisdcos.directory">>,
+%%                    <<"support.mesosphere.com">>, 1463878088, 5, 5, 5, 1}},
+%%            {dns_rr, <<"l4lb.thisdcos.directory">>, 1, 2, 3600,
+%%                {dns_rrdata_ns, <<"ns.l4lb.thisdcos.directory">>}},
+%%            {dns_rr, <<"ns.l4lb.thisdcos.directory">>, 1, 1, 3600,
+%%                {dns_rrdata_a, {198, 51, 100, 1}}}]},
+%%    ?assertEqual(Expected, Zone).
+%%
 overallocate_test() ->
-    State0 = #state{ref = undefined},
-    FakeVIPs = [{{tcp, {name, {<<"foo1:", N/integer>>, <<"marathon">>}}, 5000},
-        [{backend, N}]} || N <- lists:seq(1, ?MAX_INT_IP - ?MIN_INT_IP + 100)],
-    ?assertThrow(out_of_ips, process_vips(FakeVIPs, State0)).
+    State = #state{max_ip_num = Max, min_ip_num = Min} = state(),
+    FakeNames = lists:seq(1, Max - Min + 1),
+    ?assertThrow(out_of_ips, update_name_mapping(FakeNames, State)).
 
-create_delete_test() ->
-    State0 = #state{ref = undefined},
-    {_Out, State1} = remap_name_and_allocate({{tcp, {name, {<<"foo">>, <<"marathon">>}}, 5000}, ?FAKE_BACKENDS},
-        {[], State0}),
-    {[], State2} = process_vips([], State1),
-    ?assertEqual(0, gb_sets:size(State2#state.allocated_ip_ports)),
-    ?assertEqual(0, gb_trees:size(State2#state.name_to_ip_port)).
 
 ip_to_integer_test() ->
     ?assertEqual(4278190080, ip_to_integer({255, 0, 0, 0})),
@@ -547,66 +540,6 @@ prop_ip_and_back() ->
         IntIP,
         int_ip(),
         ip_to_integer(integer_to_ip(IntIP)) =:= IntIP
-    ).
-
-backends() ->
-    orderedlist({ip(), port()}).
-
-port() ->
-    integer(0, 65535).
-normal_vip() ->
-    {
-        {tcp, ip(), port()},
-        backends()
-    }.
-framework_name() ->
-    binary().
-vip_name() ->
-    binary().
-named_vip() ->
-    {
-        {tcp, {name, vip_name(), framework_name()}, port()},
-        backends()
-    }.
-named_or_normal_vip() ->
-    oneof([named_vip(), normal_vip()]).
-
-vips() ->
-    orderedlist(named_or_normal_vip()).
-
-prop_never_lose_vip() ->
-    State0 = #state{ref = undefined},
-    ?FORALL(
-        VIPs0,
-        vips(),
-        begin
-            VIPs1 = lists:usort(VIPs0),
-            {VIPs2, _State1} = process_vips(VIPs1, State0),
-            length(VIPs2) =:= length(VIPs1)
-        end
-    ).
-
-prop_dont_crash() ->
-    State0 = #state{ref = undefined},
-    ?FORALL(
-        ListOfVIPs0,
-        list(vips()),
-        begin
-                lists:foldl(
-                    fun(VIPs0, S0) ->
-                        VIPs1 = orddict:from_list(VIPs0),
-                        NamedVIPs = [x || {{_Protocol, {name, _Name}, _PortNumber}, _Backends} <- VIPs1],
-                        NamedVIPCount = length(NamedVIPs),
-                        {_, S1} = process_vips(VIPs1, S0),
-                        true = gb_trees:size(S1#state.name_to_ip_port) =:= NamedVIPCount,
-                        true = gb_sets:size(S1#state.allocated_ip_ports) =:= NamedVIPCount,
-                        S1
-                    end,
-                    State0,
-                    ListOfVIPs0
-                ),
-            true
-        end
     ).
 
 -endif.

@@ -30,6 +30,7 @@
 %% pid is the "subscriber" pid
 -record(state, {callback = erlang:error()}).
 
+-spec(push_vips([{{tcp, inet:ip4_address(), inet:port_number()}, [{inet:ip4_address(), inet:port_number()}]}]) -> ok).
 push_vips(Vips) ->
   gen_event:sync_notify(?SERVER, {push_vips, Vips}).
 
