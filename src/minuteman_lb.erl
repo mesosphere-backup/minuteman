@@ -36,13 +36,6 @@
 -include("minuteman.hrl").
 
 -ifdef(TEST).
--export([initial_state/0,
-  stop/0,
-  command/1,
-  precondition/2,
-  postcondition/3,
-  next_state/3
-  ]).
 -include_lib("stdlib/include/qlc.hrl").
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
@@ -495,55 +488,6 @@ notify_metrics(_, _Backend) ->
 
 -ifdef(TEST).
 
--record(test_state, {known_vips = sets:new()}).
-
-stop() ->
-  gen_server:call(?MODULE, clear),
-  gen_server:stop(?MODULE).
-
-
-proper_test() ->
-  [] = proper:module(?MODULE).
-
-initial_state() ->
-  #test_state{}.
-
-prop_server_works_fine() ->
-  ?FORALL(Cmds, commands(?MODULE),
-          ?TRAPEXIT(
-             begin
-               {ok, Pid} = lashup_gm_route:start_link(),
-               ?MODULE:start_link(),
-               {History, State, Result} = run_commands(?MODULE, Cmds),
-               ?MODULE:stop(),
-               exit(Pid, shutdown),
-               ?WHENFAIL(io:format("History: ~w\nState: ~w\nResult: ~w\n",
-                                   [History, State, Result]),
-                         Result =:= ok)
-             end)).
-
-precondition(_, _) -> true.
-
-postcondition(_S, {call, _, pick_backend, [Vips]}, Result) ->
-  pick_backend_postcondition(Vips, Result);
-postcondition(_, _, _) -> true.
-
-pick_backend_postcondition([], {error, no_backends_available}) ->
-  true;
-pick_backend_postcondition(Vips, {ok, #backend{ip_port = {IP, Port}}}) ->
-  lists:member({IP, Port}, Vips);
-pick_backend_postcondition(_, _) ->
-  false.
-
-
-next_state(#test_state{known_vips = KnownVips}, _V, {call, _, decr_pending, [Vip, _Success]}) ->
-  #test_state{known_vips = sets:add_element(Vip, KnownVips)};
-next_state(#test_state{known_vips = KnownVips}, _V, {call, _, incr_pending, [Vip]}) ->
-  #test_state{known_vips = sets:add_element(Vip, KnownVips)};
-next_state(S, _V, {call, _, pick_backend, [_Vips]}) ->
-  S;
-next_state(S, _, _) ->
-  S.
 
 ip() ->
   ?LET({I1, I2, I3, I4},
