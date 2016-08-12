@@ -22,7 +22,9 @@
   api_listen_port/0,
   agent_reregistration_threshold/0,
   agent_polling_enabled/0,
-  agent_port/0
+  agent_port/0,
+  min_named_ip/0,
+  max_named_ip/0
   ]).
 
 
@@ -71,3 +73,15 @@ agent_polling_enabled() ->
 agent_port() ->
   application:get_env(minuteman, agent_port, 5051).
 
+-spec(min_named_ip() -> inet:ip4_address()).
+min_named_ip() ->
+  application:get_env(minuteman, min_named_ip, {11, 0, 0, 0}).
+
+-spec(max_named_ip() -> inet:ip4_address()).
+-ifndef(TEST).
+max_named_ip() ->
+  application:get_env(minuteman, max_named_ip, {11, 255, 255, 254}).
+-else.
+max_named_ip() ->
+  application:get_env(minuteman, max_named_ip, {11, 0, 0, 254}).
+-endif.

@@ -42,7 +42,6 @@ start_link(Args) ->
 
 do_handle(NFQPid, Info) ->
   Now1 = erlang:monotonic_time(micro_seconds),
-  initialize_seed(),
   {payload, Payload} = lists:keyfind(payload, 1, Info),
   MappingRet = to_mapping(Payload),
   Now2 = erlang:monotonic_time(micro_seconds),
@@ -96,13 +95,6 @@ to_mapping(Payload) ->
       lager:warning("Could not map connection"),
       {error, {no_backend, Else}}
   end.
-
-
-
-initialize_seed() ->
-  random:seed(erlang:phash2([node()]),
-    erlang:monotonic_time(),
-    erlang:unique_integer()).
 
 -compile(export_all).
 -ifdef(TEST).
