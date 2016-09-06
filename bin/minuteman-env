@@ -75,6 +75,9 @@ export MESOS_STATE_SSL_ENABLED
 MINUTEMAN_DEBUG_API_LISTEN_IP=${MINUTEMAN_DEBUG_API_LISTEN_IP:="\\\"127.0.0.1\\\""}
 export MINUTEMAN_DEBUG_API_LISTEN_IP
 
+## Lock Disterl port by default
+DISTERL_PORT=${DISTERL_PORT:=62503}
+export DISTERL_PORT
 
 ## SSL / Distributed Erlang config
 export ERL_FLAGS="${ERL_FLAGS} -proto_dist ${ERLANG_DISTRIBUTION}"
@@ -94,5 +97,7 @@ export ERL_FLAGS="${ERL_FLAGS} -ssl_dist_opt server_depth ${SERVER_DEPTH}"
 export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED} \
                                -minuteman api_listen_ip ${MINUTEMAN_DEBUG_API_LISTEN_IP}"
 
+## Distributed Erlang
+export ERL_FLAGS="${ERL_FLAGS} -kernel inet_dist_listen_min ${DISTERL_PORT} -kernel inet_dist_listen_max ${DISTERL_PORT}"
 
 NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@
