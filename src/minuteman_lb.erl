@@ -53,9 +53,6 @@
 %% How many lookups we do to populate the backends list in Minuteman
 -define(LOOKUP_LIMIT, 20).
 
-%% The threshold of backends before we use the probabilistic algorithm
--define(BACKEND_LIMIT, 10).
-
 
 %%%===================================================================
 %%% API
@@ -81,54 +78,12 @@ get_backend({IP, Port}) ->
 pick_backend([]) ->
   {error, no_backends_available};
 
-pick_backend(BackendAddrs) when length(BackendAddrs) > ?BACKEND_LIMIT ->
+pick_backend(BackendAddrs) ->
   minuteman_metrics:update([probabilistic_backend_picker], 1, spiral),
   Now = erlang:monotonic_time(),
   ReachabilityCache = reachability_cache(),
   Choice = probabilistic_backend_chooser(Now, ReachabilityCache, BackendAddrs, [], [], []),
-  {ok, Choice};
-
-pick_backend(BackendAddrs) ->
-  minuteman_metrics:update([simple_backend_picker], 1, spiral),
-  %% Pull backends out of ets.
-  Now = erlang:monotonic_time(),
-  Backends = [get_backend_or_default(Backend) || Backend <- BackendAddrs],
-
-  {Up, Down} = lists:partition(fun (Backend) ->
-                                   is_open(Now, Backend)
-                               end, Backends),
-
-  % If there are no backends up, may as well try one that's down.
-  Choices = case Up of
-              [] ->
-                Down;
-              _ ->
-                Up
-            end,
-  Tree = tree(),
-  {ReachableTrue, ReachableFalse} = lists:partition(
-    fun(Backend) ->
-      {IP, _Port} = Backend#backend.ip_port,
-      is_reachable_real(IP, Tree)
-    end,
-    Choices),
-
-  % If there's only one choice, use it.  Otherwise, try to get two
-  % different random selections and pick the one with the better
-  % cost.
-  case Choices of
-    [Choice] ->
-      {ok, Choice};
-    _ ->
-      %% We know there must be at least two backends
-      {Backend1, ReachableTrue1, ReachableFalse1} =
-        choose_from_backends(ReachableTrue, ReachableFalse),
-      {Backend2, _, _} =
-        choose_from_backends(ReachableTrue1, ReachableFalse1),
-      Choice = choose_backend_by_cost(Backend1, Backend2),
-      {ok, Choice}
-  end.
-
+  {ok, Choice}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -318,16 +273,6 @@ track_success(false, Backend = #backend{total_failures = TotalFailures,
                   last_failure_time = Now};
 track_success(no_success_change, Backend) ->
   Backend.
-
-
--spec(choose_from_backends(ReachableBackends :: [#backend{}], NotReachableBackends :: [#backend{}]) ->
-  {Backend :: #backend{}, ReachableBackends1 :: [#backend{}], NotReachableBackends1 :: [#backend{}]}).
-choose_from_backends(B1, B2) when length(B1) > 0 ->
-  {B1Prime, Backend} = pop_item_from_list(B1),
-  {Backend, B1Prime, B2};
-choose_from_backends(B1, B2) when length(B2) > 0 ->
-  {B2Prime, Backend} = pop_item_from_list(B2),
-  {Backend, B1, B2Prime}.
 
 -spec(pop_item_from_list(List :: [term()]) -> {ListPrime :: [term()], Item :: term()}).
 pop_item_from_list(List) ->
