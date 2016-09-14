@@ -77,7 +77,7 @@ load_rule({Table, Chain, Rule, Args}) ->
     _ ->
       lager:debug("Loading rule: ~p", [Rule1]),
       case iptables:insert(Table, Chain, Rule1) of
-        {ok, []} ->
+        {ok, _} ->
           ok;
         Else ->
           lager:error("Unknown response: ~p", [Else]),
