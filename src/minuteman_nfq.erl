@@ -84,6 +84,7 @@ start_link(Queue) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
 init([Queue]) ->
+  process_flag(trap_exit, true),
   process_flag(min_heap_size, 2000000),
   process_flag(priority, high),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),

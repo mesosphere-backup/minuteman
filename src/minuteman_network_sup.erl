@@ -79,8 +79,17 @@ load_rule({Table, Chain, Rule, Args}) ->
       case iptables:insert(Table, Chain, Rule1) of
         {ok, []} ->
           ok;
-        Else ->
-          lager:error("Unknown response: ~p", [Else]),
-          erlang:error(iptables_fail)
+        Else -> setup_iptables_error(Else)
       end
   end.
+
+%% If TEST is defined, iptables will not run the command and will return {ok, cmd_string}.
+-ifdef(TEST).
+-spec setup_iptables_error(string()) -> ok.
+setup_iptables_error(_) -> ok.
+-else.
+-spec setup_iptables_error(string()) -> no_return().
+setup_iptables_error(Error) ->
+  lager:error("Unknown response: ~p", [Error]),
+  erlang:error(iptables_fail).
+-endif.

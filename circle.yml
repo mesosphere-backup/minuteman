@@ -26,6 +26,7 @@ dependencies:
 test:
   override:
     - make check
+    - sudo bash -c 'source ~/extras/otp/19.0/activate && make check'
     - ./elvis rock
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
