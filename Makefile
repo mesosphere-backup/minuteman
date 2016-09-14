@@ -37,7 +37,7 @@ eunit:
 	./rebar3 as test eunit
 
 ct:
-	./rebar3 as test ct --sname=ct@localhost
+	./rebar3 as test ct
 
 cover:
 	./rebar3 as test cover
