@@ -38,6 +38,7 @@
   "nfnetlink_queue","nfnetlink","nf_nat_masquerade_ipv4","nf_conntrack_ipv4",
   "nf_defrag_ipv4","nf_nat_ipv4","nf_nat","nf_conntrack", "iptable_nat", "ipt_MASQUERADE"]).
 
+
 %% ===================================================================
 %% API functions
 %% ===================================================================
@@ -63,7 +64,7 @@ init([]) ->
       {one_for_one, 5, 10},
       Children
     }
-  }.
+ }.
 
 setup_iptables() ->
   lists:foreach(fun(Module) -> os:cmd(lists:flatten(io_lib:format("modprobe ~s", [Module]))) end, ?MODULES),
@@ -79,8 +80,16 @@ load_rule({Table, Chain, Rule, Args}) ->
       case iptables:insert(Table, Chain, Rule1) of
         {ok, []} ->
           ok;
-        Else ->
-          lager:error("Unknown response: ~p", [Else]),
-          erlang:error(iptables_fail)
+        Else -> setup_iptables_error(Else)
       end
   end.
+
+-ifdef(TEST).
+setup_iptables_error(_) -> ok.
+-else.
+setup_iptables_error(Error) ->
+  lager:error("Unknown response: ~p", [Error]),
+  erlang:error(iptables_fail).
+-endif.
+
+

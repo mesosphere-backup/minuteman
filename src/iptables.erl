@@ -29,7 +29,11 @@
 -define(DEFAULT_TABLE, filter).
 -endif.
 
+-ifdef(TEST).
+-define(CMD(S), S).
+-else.
 -define(CMD(S), os:cmd(S)).
+-endif.
 
 -include("iptables.hrl").
 
