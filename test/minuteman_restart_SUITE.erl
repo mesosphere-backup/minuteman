@@ -3,15 +3,13 @@
 
 -include_lib("common_test/include/ct.hrl").
 
-all() ->
-  [test_init,
-   test_init].
+all() -> [test_restart].
 
-test_init(_Config) -> ok.
-
-init_per_testcase(_, Config) ->
+test_restart(_Config) ->
   {ok, _} = application:ensure_all_started(minuteman),
-  Config.
-
-end_per_testcase(_, _Config) -> 
+  ok = application:stop(minuteman),
+  {ok, _} = application:ensure_all_started(minuteman),
+  ok = application:stop(minuteman),
+  {ok, _} = application:ensure_all_started(minuteman),
   ok = application:stop(minuteman).
+
