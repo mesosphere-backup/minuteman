@@ -25,6 +25,7 @@ dependencies:
 
 test:
   override:
+    - make compile
     - sudo bash -c 'source ~/extras/otp/19.0/activate && make check'  
     - ./elvis rock
   post:
