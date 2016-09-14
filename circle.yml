@@ -25,7 +25,7 @@ dependencies:
 
 test:
   override:
-    - make check
+    - sudo make check
     - ./elvis rock
   post:
     - mkdir -p $CIRCLE_TEST_REPORTS/
