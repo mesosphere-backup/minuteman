@@ -1,12 +1,11 @@
--module(minuteman_restart).
+-module(minuteman_restart_SUITE).
 -compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
 
 all() ->
-  [test_init
-  ,test_init
-  ].
+  [test_init,
+   test_init].
 
 test_init(_Config) -> ok.
 
