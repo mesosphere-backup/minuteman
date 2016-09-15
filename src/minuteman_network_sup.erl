@@ -85,8 +85,10 @@ load_rule({Table, Chain, Rule, Args}) ->
   end.
 
 -ifdef(TEST).
+-spec setup_iptables_error(string()) -> ok.
 setup_iptables_error(_) -> ok.
 -else.
+-spec setup_iptables_error(string()) -> no_return().
 setup_iptables_error(Error) ->
   lager:error("Unknown response: ~p", [Error]),
   erlang:error(iptables_fail).
