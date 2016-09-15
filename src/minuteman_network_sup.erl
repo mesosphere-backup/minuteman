@@ -64,7 +64,7 @@ init([]) ->
       {one_for_one, 5, 10},
       Children
     }
- }.
+  }.
 
 setup_iptables() ->
   lists:foreach(fun(Module) -> os:cmd(lists:flatten(io_lib:format("modprobe ~s", [Module]))) end, ?MODULES),
@@ -93,5 +93,3 @@ setup_iptables_error(Error) ->
   lager:error("Unknown response: ~p", [Error]),
   erlang:error(iptables_fail).
 -endif.
-
-
