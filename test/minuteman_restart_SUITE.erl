@@ -18,4 +18,3 @@ test_restart(_Config) ->
   ok = application:stop(minuteman),
   {ok, _} = application:ensure_all_started(minuteman),
   ok = application:stop(minuteman).
-
