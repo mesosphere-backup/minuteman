@@ -6,7 +6,7 @@
 all() -> all(os:cmd("id -u")).
 
 % tests that need root
-all("0\n") -> [test_restart].
+all("0\n") -> [test_restart];
 
 % tests that do not need root
 all(_) -> [].
