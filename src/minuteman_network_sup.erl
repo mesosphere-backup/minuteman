@@ -38,7 +38,6 @@
   "nfnetlink_queue","nfnetlink","nf_nat_masquerade_ipv4","nf_conntrack_ipv4",
   "nf_defrag_ipv4","nf_nat_ipv4","nf_nat","nf_conntrack", "iptable_nat", "ipt_MASQUERADE"]).
 
-
 %% ===================================================================
 %% API functions
 %% ===================================================================
@@ -84,6 +83,7 @@ load_rule({Table, Chain, Rule, Args}) ->
       end
   end.
 
+%% If TEST is defined, iptables will not run the command and will return {ok, cmd_string}.
 -ifdef(TEST).
 -spec setup_iptables_error(string()) -> ok.
 setup_iptables_error(_) -> ok.
