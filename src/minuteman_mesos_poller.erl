@@ -354,34 +354,50 @@ collect_vips_from_discovery_info([Task | Tasks], VIPBEs) ->
 collect_vips_from_discovery_info(_Task = #task{discovery = undefined}) ->
     [];
 collect_vips_from_discovery_info(Task = #task{discovery = #discovery{ports = Ports}}) ->
-    collect_vips_from_discovery_info_fold(Ports, Task, []).
+    collect_vips_from_discovery_info(Ports, Task, []).
 
 
--spec(collect_vips_from_discovery_info_fold([mesos_port()], task(), [vip_be()]) -> [vip_be()]).
-collect_vips_from_discovery_info_fold([], _Task, Acc) ->
+-spec(collect_vips_from_discovery_info([mesos_port()], task(), [vip_be()]) -> [vip_be()]).
+collect_vips_from_discovery_info([], _Task, Acc) ->
     Acc;
-
-collect_vips_from_discovery_info_fold([#mesos_port{protocol = Protocol, labels = PortLabels, number = PortNum}| Ports],
+collect_vips_from_discovery_info([Port = #mesos_port{labels = PortLabels}| Ports],
         Task, Acc) ->
-    Slave = Task#task.slave,
-    #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
     VIPLabels =
         maps:filter(
             fun(Key, _Value) ->
                 nomatch =/= binary:match(Key, [<<"VIP">>, <<"vip">>])
             end,
             PortLabels
-    ),
+        ),
     VIPBins = [{VIPBin, Task} || {_, VIPBin} <- maps:to_list(VIPLabels)],
     VIPs = lists:map(fun parse_vip/1, VIPBins),
-    BEs = [#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
-        backend_ip =  AgentIP} || {VIPIP, VIPPort} <- VIPs],
-    collect_vips_from_discovery_info_fold(Ports, Task, BEs ++ Acc).
+    BEs = collect_vips_from_discovery_info_fold(PortLabels, VIPs, Port, Task),
+    collect_vips_from_discovery_info(Ports, Task, BEs ++ Acc).
+
+
+-type name_or_ip() :: inet:ip4_address() | {name, Hostname :: binary(), FrameworkName :: framework_name()}.
+-type vips() :: {name_or_ip(), inet:port_number()}.
+-spec(collect_vips_from_discovery_info_fold(LabelBin :: map(), [vips()], mesos_port(), task()) -> [vip_be()]).
+collect_vips_from_discovery_info_fold(_PortLabels, [], _Port, _Task) ->
+    [];
+collect_vips_from_discovery_info_fold(#{<<"network-scope">> := <<"container">>}, VIPs,
+    #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
+    #task{statuses = [#task_status{container_status = #container_status{
+          network_infos = [#network_info{ip_addresses = [#ip_address{
+          ip_address = IPAddress}|_]}|_]}}|_]} = Task,
+    [#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
+        backend_ip =  IPAddress} || {VIPIP, VIPPort} <- VIPs];
+collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
+    #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
+    Slave = Task#task.slave,
+    #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
+    [#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
+        backend_ip =  AgentIP} || {VIPIP, VIPPort} <- VIPs].
+
 
 %({binary(),_}) -> {{'name',{binary(),'undefined' | binary()}} | {byte(),byte(),byte(),byte()},'error' | integer()}
 
 -type label_value() :: binary().
--type name_or_ip() :: inet:ip4_address() | {name, Hostname :: binary(), FrameworkName :: framework_name()}.
 -spec(parse_vip({LabelBin :: label_value(), task()}) -> {name_or_ip(), inet:port_number()}).
 parse_vip({LabelBin, Task = #task{}}) ->
     [HostBin, PortBin] = binary:split(LabelBin, <<":">>),
@@ -496,6 +512,19 @@ string_to_integer(Str) ->
 fake_state() ->
     #state{agent_ip = {0, 0, 0, 0}}.
 
+overlay_vips_test() ->
+    {ok, Data} = file:read_file("testdata/overlay.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+           {tcp, {1, 2, 3, 4}, 5000},
+           [
+              {{9, 0, 1, 130}, 80}
+           ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
 two_healthcheck_free_vips_test() ->
     {ok, Data} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
