@@ -1,6 +1,7 @@
 # Minuteman
 [![Circle CI](https://circleci.com/gh/dcos/minuteman.svg?style=svg&circle-token=571c4d23069b744377653d0f1246296c784bd9b0)](https://circleci.com/gh/dcos/minuteman)
 [![velocity](http://velocity.mesosphere.com/service/velocity/buildStatus/icon?job=public-dcos-networking-minuteman-master)](http://velocity.mesosphere.com/service/velocity/job/public-dcos-networking-minuteman-master/)
+[![codecov.io](http://codecov.io/github/dcos/minuteman/coverage.svg)](http://codecov.io/github/dcos/minuteman)
 
 A distributed, highly available service discovery & internal load balancer for distributed systems (microservices and containers).
 
