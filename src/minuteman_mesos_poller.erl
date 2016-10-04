@@ -37,7 +37,6 @@
 
 
 -define(VIP_PORT, "VIP_PORT").
--define(URI_FORMAT, "http://~s:~B/state").
 -record(state, {
     agent_ip = erlang:error() :: inet:ip4_address(),
     last_poll_time = undefined :: integer() | undefined
@@ -193,14 +192,9 @@ maybe_poll(State) ->
             State
     end.
 
-agent_uri(AgentIP) ->
-    AgentIPStr = inet:ntoa(AgentIP),
-    AgentPort = minuteman_config:agent_port(),
-    lists:flatten(io_lib:format(?URI_FORMAT, [AgentIPStr, AgentPort])).
-
-poll(State) ->
-    AgentURI = agent_uri(State#state.agent_ip),
-    case mesos_state_client:poll(AgentURI) of
+poll(State = #state{agent_ip = AgentIP}) ->
+    Port = minuteman_config:agent_port(),
+    case mesos_state_client:poll(AgentIP, Port) of
         {error, Reason} ->
             %% This might generate a lot of messages?
             lager:warning("Unable to poll agent: ~p", [Reason]),

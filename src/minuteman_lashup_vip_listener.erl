@@ -100,7 +100,6 @@ init([]) ->
     MaxIP = ip_to_integer(minuteman_config:max_named_ip()),
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?VIPS_KEY}) -> true end)),
     State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP},
-    lager:warning("State: ~p", [State]),
     {ok, State}.
 
 %%--------------------------------------------------------------------
