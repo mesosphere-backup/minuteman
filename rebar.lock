@@ -1,3 +1,4 @@
+{"1.1.0",
 [{<<"base32">>,
   {git,"https://github.com/aetrion/base32_erlang.git",
        {ref,"40431a7480176b24863e18b92d9872e54c714df5"}},
@@ -60,7 +61,7 @@
   0},
  {<<"lashup">>,
   {git,"git://github.com/dcos/lashup.git",
-       {ref,"5e8dece6e4c42f2b40859bbfa8647e12f9a9b2c5"}},
+       {ref,"9b8b841703eedb38dd69b3a3cb6b5775eb2c1939"}},
   0},
  {<<"meck">>,
   {git,"https://github.com/eproxus/meck",
@@ -102,4 +103,8 @@
  {<<"webmachine">>,
   {git,"git://github.com/webmachine/webmachine",
        {ref,"b4758b51c05e8f4e8898a70b7a14514a8c150ffa"}},
-  0}].
+  0}]}.
+[
+{pkg_hash,[
+ {<<"mochiweb">>, <<"80804AD342AFA3D7F3524040D4EED66CE74B17A555DE454AC85B07C479928E46">>}]}
+].
