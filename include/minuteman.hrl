@@ -9,6 +9,12 @@
 -author("sdhillon").
 -author("Tyler Neely").
 
+-record(ct_timer, {
+  id :: integer(),
+  timer_id :: timer:tref(),
+  start_time :: integer()
+  }).
+
 -record(mapping, {
   orig_src_ip,
   orig_src_port,

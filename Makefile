@@ -42,6 +42,9 @@ ct:
 cover:
 	./rebar3 as test cover
 
+rock:
+	./elvis rock
+
 ##
 ## Release targets
 ##
