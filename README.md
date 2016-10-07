@@ -18,7 +18,7 @@ When you launch a set of tasks with these labels, we distribute them to all of t
 
 #### Caveats
 1. You musn't firewall traffic between the nodes
-2. You musn't change ip_local_port_range
+2. You musn't change `ip_local_port_range`
 3. You must have the `ipset` package installed
 4. You must run a stock kernel from RHEL 7.2+, or Ubuntu 14.04+ LTS
 

@@ -53,11 +53,6 @@
   backends = sets:new()
   }).
 
--record(ct_timer, {
-  id :: integer(),
-  timer_id :: timer:tref(),
-  start_time :: integer()
-  }).
 
 %%%===================================================================
 %%% API
@@ -104,7 +99,7 @@ start_link() ->
 init([]) ->
   process_flag(min_heap_size, 2000000),
   minuteman_vip_events:add_sup_handler(fun push_vips/1),
-  ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table]),
+  ets_new_connection_timers(),
   {ok, Socket} = socket(netlink, raw, ?NETLINK_NETFILTER, []),
   {gen_socket, RealPort, _, _, _, _} = Socket,
   erlang:link(RealPort),
@@ -115,6 +110,15 @@ init([]) ->
   netlink:rcvbufsiz(Socket, ?RCVBUF_DEFAULT),
   ok = gen_socket:input_event(Socket, true),
   {ok, #state{socket = Socket}}.
+
+%% Creates a connection timer table. It's public during testing for Common Tests to simulate events.
+-ifdef(TEST).
+ets_new_connection_timers() ->
+  ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table, public, {read_concurrency, true}]).
+-else.
+ets_new_connection_timers() ->
+  ets:new(connection_timers, [{keypos, #ct_timer.id}, named_table]).
+-endif.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -171,7 +175,7 @@ handle_info({check_conn_connected, {ID, IP, Port, VIP, VIPPort}}, State) ->
       timer:cancel(TimerID),
       Success = false,
 
-      Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port)},
+      Tags = named_tags(IP, Port, VIP, VIPPort),
       AggTags = [[hostname], [hostname, backend]],
       telemetry:counter(mm_connect_failures, Tags, AggTags, 1),
 
@@ -232,6 +236,16 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+-spec(named_tags(IP :: inet:ip4_address(),
+                 Port :: inet:port_numbrer(),
+                 VIP :: inet:ip4_address(),
+                 VIPPort :: inet:port_numbrer()) -> map:map()).
+named_tags(IP, Port, VIP, VIPPort) ->
+  case minuteman_lashup_vip_listener:lookup_vips([{ip, VIP}]) of
+    [{name, VIPName}] -> #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port), name => VIPName};
+    _ -> #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port)}
+  end.
+
 socket(Family, Type, Protocol, Opts) ->
   case proplists:get_value(netns, Opts) of
     undefined ->
@@ -247,7 +261,6 @@ handle_conn(Vips, Backends, #ctnetlink{msg = {_Family, _, _, Props}}) ->
   {tuple_reply, Reply} = proplists:lookup(tuple_reply, Props),
   AddressesReply = fmt_net(Reply),
   maybe_mark_replied(Vips, Backends, ID, AddressesReply, Orig, Status).
-
 
 maybe_mark_replied(Vips, Backends, ID,
                    {Proto, DstIP, DstPort, _SrcIP, _SrcPort} = AddressesReply,
@@ -281,7 +294,6 @@ mark_replied(ID,
         [#ct_timer{timer_id = TimerID, start_time = StartTime}] ->
           TimeDelta = erlang:monotonic_time(nano_seconds) - StartTime,
           timer:cancel(TimerID),
-
           record_replied_metrics(VIP, VIPPort, DstIP, DstPort, TimeDelta),
 
           Success = true,
@@ -304,7 +316,7 @@ mark_replied(ID,
   end.
 
 record_replied_metrics(VIP, VIPPort, DstIP, DstPort, TimeDelta) ->
-  Tags = #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(DstIP, DstPort)},
+  Tags = named_tags(DstIP, DstPort, VIP, VIPPort),
   AggTags = [[hostname], [hostname, backend]],
   telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
   telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta),
