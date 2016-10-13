@@ -7,6 +7,8 @@ case os:type() of
 end.
 Fun =
     fun
+        ({deps, Deps}) when Platform =/= linux ->
+            {deps, lists:keydelete(procket, 1, Deps)};
         ({overrides, Overrides}) when Platform =/= linux ->
             {overrides, lists:keydelete(gen_socket, 2, Overrides)};
         (Term) ->
