@@ -1,6 +1,6 @@
 machine:
   environment:
-    PATH: ${HOME}/extras/bin:${HOME}/extras/otp/19.0/bin:${PATH}
+    PATH: ${HOME}/extras/bin:${HOME}/extras/otp/19.1/bin:${PATH}
 dependencies:
   cache_directories:
     - ~/extras
@@ -18,7 +18,7 @@ dependencies:
     - sudo service postgresql stop
     - sudo service redis-server stop
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
-    - if [ ! -d ~/extras/otp/19.0 ]; then ./kerl build 19.0 19.0; ./kerl install 19.0 ~/extras/otp/19.0; fi:
+    - if [ ! -d ~/extras/otp/19.1 ]; then ./kerl build 19.1 19.1; ./kerl install 19.1 ~/extras/otp/19.1; fi:
         timeout: 1800
   override:
     - make
@@ -26,7 +26,7 @@ dependencies:
 test:
   override:
     - make check
-    - sudo bash -c 'source ~/extras/otp/19.0/activate && make check'
+    - sudo bash -c 'source ~/extras/otp/19.1/activate && make check'
     - ./elvis rock
   post:
     - git clone https://github.com/idubrov/covertool
