@@ -32,16 +32,7 @@ maybe_add_network_child(Children) ->
     end.
 add_default_children(Children) ->
     {ok, _App} = application:get_application(?MODULE),
-    Webmachine = {minuteman_wm, {minuteman_wm, start, []},
-           permanent, 5000, worker, [minuteman_wm, mochiweb_socket_server]},
-
     [
-        Webmachine,
-        ?CHILD(minuteman_vip_events, worker),
-        ?CHILD(minuteman_ipsets, worker),
-        ?CHILD(minuteman_vip_server, worker),
-        ?CHILD(minuteman_metric_cleaner, worker),
-        ?CHILD(minuteman_lashup_vip_listener, worker),
         ?CHILD(minuteman_mesos_poller, worker),
         ?CHILD(minuteman_lashup_publish, worker),
         ?CHILD(minuteman_lashup_index, worker)|

@@ -51,7 +51,8 @@
 -record(state, {
     ref = erlang:error() :: reference(),
     min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
-    max_ip_num = erlang:error(no_max_ip_num) :: ip4_num()
+    max_ip_num = erlang:error(no_max_ip_num) :: ip4_num(),
+    vips
     }).
 -type state() :: #state{}.
 
@@ -134,6 +135,8 @@ handle_call(_Request, _From, State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}).
+handle_cast(push_vips, State) ->
+    {noreply, State};
 handle_cast(_Request, State) ->
     {noreply, State}.
 
@@ -218,11 +221,12 @@ handle_lookup_vip(Arg)  -> {badmatch, Arg}.
 handle_event(_Event = #{value := VIPs}, State) ->
     handle_value(VIPs, State).
 
-handle_value(VIPs0, State) ->
-    VIPs1 = process_vips(VIPs0, State),
-    push_state_to_spartan(State),
-    minuteman_vip_events:push_vips(VIPs1),
-    State.
+handle_value(VIPs0, State0) ->
+    VIPs1 = process_vips(VIPs0, State0),
+    State1 = State0#state{vips = VIPs1},
+    push_state_to_spartan(State1),
+    minuteman_ipvs:push_vips(VIPs1),
+    State1.
 
 process_vips(VIPs0, State) ->
     VIPs1 = lists:map(fun rewrite_keys/1, VIPs0),
