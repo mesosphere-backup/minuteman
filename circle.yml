@@ -10,6 +10,9 @@ dependencies:
     - .cache
     - ~/.cache
   pre:
+    - sudo ip link add minuteman type dummy
+    - sudo ip link set minuteman up
+    - sudo modprobe ip_vs
     - sudo service mongodb stop
     - sudo service rabbitmq-server stop
     - sudo service couchdb stop
