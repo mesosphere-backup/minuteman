@@ -17,9 +17,9 @@
     fd                  :: non_neg_integer(),
     pid                 :: non_neg_integer(),
     seq = 0             :: non_neg_integer(),
-    last_rq_from        :: pid() | undefined,
-    replies             :: list(),
-    current_seq         :: non_neg_integer(),
+    last_rq_from        :: undefined | gen_statem:from(),
+    replies = []        :: list(),
+    current_seq         :: undefined | non_neg_integer(),
     family
 }).
 
@@ -81,7 +81,7 @@ start_link() ->
 start_link(FamilyID) ->
     gen_statem:start_link(?MODULE, [FamilyID], []).
 
--spec(init([]) -> {ok, state_name(), state_data()}).
+-spec(init([FamilyID :: non_neg_integer()]) -> {ok, state_name(), state_data()}).
 init([FamilyID]) ->
     Pid = list_to_integer(os:getpid()),
     {ok, Fd} = procket:socket(netlink, dgram, FamilyID),
@@ -150,6 +150,8 @@ wait_for_responses_rtnl(internal, {nl_msg, Msg = #rtnetlink{seq = CurrentSeq}},
     {keep_state, State1}.
 
 
+do_reply(_, #state{last_rq_from = From}) when not is_pid(From) ->
+    throw(inconsistent_state);
 do_reply(#netlink{type = done}, #state{last_rq_from = From, replies = Replies0}) ->
     Replies1 = lists:reverse(Replies0),
     gen_statem:reply(From, {ok, Replies1});
@@ -161,13 +163,7 @@ do_reply(#netlink{type = error, msg = {Error, _Payload}}, #state{last_rq_from = 
     gen_statem:reply(From, {error, Error, Replies1});
 do_reply(#rtnetlink{type = done}, #state{last_rq_from = From, replies = Replies0}) ->
     Replies1 = lists:reverse(Replies0),
-    gen_statem:reply(From, {ok, Replies1});
-do_reply(#rtnetlink{type = error, msg = {_Error = 0, _Payload}}, #state{last_rq_from = From, replies = Replies0}) ->
-    Replies1 = lists:reverse(Replies0),
-    gen_statem:reply(From, {ok, Replies1});
-do_reply(#rtnetlink{type = error, msg = {Error, _Payload}}, #state{last_rq_from = From, replies = Replies0}) ->
-    Replies1 = lists:reverse(Replies0),
-    gen_statem:reply(From, {error, Error, Replies1}).
+    gen_statem:reply(From, {ok, Replies1}).
 
 
 
