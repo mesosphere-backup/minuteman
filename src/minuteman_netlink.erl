@@ -150,7 +150,7 @@ wait_for_responses_rtnl(internal, {nl_msg, Msg = #rtnetlink{seq = CurrentSeq}},
     {keep_state, State1}.
 
 
-do_reply(_, #state{last_rq_from = From}) when not is_pid(From) ->
+do_reply(_, #state{last_rq_from = {To, _Tag}}) when not is_pid(To) ->
     throw(inconsistent_state);
 do_reply(#netlink{type = done}, #state{last_rq_from = From, replies = Replies0}) ->
     Replies1 = lists:reverse(Replies0),
@@ -163,7 +163,13 @@ do_reply(#netlink{type = error, msg = {Error, _Payload}}, #state{last_rq_from = 
     gen_statem:reply(From, {error, Error, Replies1});
 do_reply(#rtnetlink{type = done}, #state{last_rq_from = From, replies = Replies0}) ->
     Replies1 = lists:reverse(Replies0),
-    gen_statem:reply(From, {ok, Replies1}).
+gen_statem:reply(From, {ok, Replies1});
+do_reply(#rtnetlink{type = error, msg = {_Error = 0, _Payload}}, #state{last_rq_from = From, replies = Replies0}) ->
+    Replies1 = lists:reverse(Replies0),
+    gen_statem:reply(From, {ok, Replies1});
+do_reply(#rtnetlink{type = error, msg = {Error, _Payload}}, #state{last_rq_from = From, replies = Replies0}) ->
+    Replies1 = lists:reverse(Replies0),
+    gen_statem:reply(From, {error, Error, Replies1}).
 
 
 
