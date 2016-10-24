@@ -11,8 +11,6 @@
 
 -behaviour(gen_statem).
 
-%% REMOVE me
--compile(export_all).
 
 -include_lib("gen_netlink/include/netlink.hrl").
 -define(SERVER, ?MODULE).
@@ -147,13 +145,19 @@ services_to_reconcile(InstalledServices, VIPsAndBackends) ->
         end,
         InstalledServices).
 
+
+
 reconcile_service({Service, {_VIP, Backends}}, State) ->
+    reconcile_service(Service, Backends, State).
+
+reconcile_service(Service, Backends, State) ->
     lager:info("Reconciling service: ~p", [Service]),
     InstalledBackends = installed_backends(Service, State),
     BackendsToAdd = backends_to_add(InstalledBackends, Backends),
     lists:foreach(fun(BE) -> add_backend_to_service(BE, Service, State) end, BackendsToAdd),
     BackendsToDelete = backends_to_delete(InstalledBackends, Backends),
-    lists:foreach(fun(BE) -> delete_backend(BE, Service, State) end, BackendsToDelete).
+    lists:foreach(fun(BE) -> delete_backend(BE, Service, State) end, BackendsToDelete),
+    ok.
 
 backends_to_add(InstalledBackends, Backends0) ->
     NormalizedInstalledBackends0 = lists:map(fun backend_address/1, InstalledBackends),
@@ -290,6 +294,7 @@ transition_vips_and_interfaces(VIPsOld, VIPsNew, State) ->
     create_new_vips_and_interfaces(VIPsOld, VIPsNew, State),
     transition_services(VIPsOld, VIPsNew, State).
 
+%% Changes destinations
 transition_services(VIPsOld, VIPsNew, State) ->
     InstalledServices = installed_services(State),
     lists:foreach(fun(Service) -> transition_service(Service, VIPsOld, VIPsNew, State) end, InstalledServices).
@@ -301,17 +306,15 @@ find_or_default(Key, Orddict, Default) ->
         {ok, Value} ->
             Value
     end.
+%reconcile_service({Service, {_VIP, Backends}}, State) ->
 transition_service(Service, VIPsOld, VIPsNew, State) ->
     Key = service_address(Service),
-    OldBackends = find_or_default(Key, VIPsOld, []),
-    NewBackends = orddict:fetch(Key, VIPsNew),
-    update_backends(Service, OldBackends, NewBackends, State).
-
-update_backends(Service, OldBackends, NewBackends, State) ->
-    BackendsToDelete = ordsets:subtract(OldBackends, NewBackends),
-    BackendsToAdd = ordsets:subtract(NewBackends, OldBackends),
-    lists:foreach(fun(BE) -> add_backend_to_service(BE, Service, State) end, BackendsToAdd),
-    lists:foreach(fun(BE) -> delete_backend(BE, Service, State) end, BackendsToDelete).
+    case  {find_or_default(Key, VIPsOld, []), find_or_default(Key, VIPsNew, [])} of
+        {Same, Same} ->
+            ok;
+        {_, NewBackends} ->
+            reconcile_service(Service, NewBackends, State)
+    end.
 
 delete_old_vips_and_interfaces(VIPsOld, VIPsNew, State) ->
     InstalledServices = installed_services(State),
