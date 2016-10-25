@@ -18,8 +18,16 @@
   agent_port/0,
   min_named_ip/0,
   max_named_ip/0,
-  minuteman_iface/0
+  minuteman_iface/0,
+  metrics_interval_seconds/0,
+  metrics_splay_seconds/0
   ]).
+
+metrics_interval_seconds() ->
+  application:get_env(minuteman, metrics_interval_seconds, 60).
+
+metrics_splay_seconds() ->
+  application:get_env(minuteman, metrics_interval_seconds, 10).
 
 minuteman_iface() ->
   application:get_env(minuteman, iface, "minuteman").
