@@ -20,16 +20,16 @@
 
 -export([init_per_testcase/2, end_per_testcase/2]).
 
-all() -> all(os:cmd("id -u")).
+all() -> all(os:cmd("id -u"), os:getenv("CIRCLECI")).
 
 -compile(export_all).
 
 %% root tests
-all("0\n") ->
+all("0\n", false) ->
     [test_basic];
 
 %% non root tests
-all(_) -> [].
+all(_, _) -> [].
 
 init_per_testcase(_, Config) ->
     application:set_env(minuteman, agent_polling_enabled, false),

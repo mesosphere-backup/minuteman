@@ -10,15 +10,6 @@ dependencies:
     - .cache
     - ~/.cache
   pre:
-    - sudo ip link add minuteman type dummy
-    - sudo ip link add webserver type dummy
-    - sudo ip link set minuteman up
-    - sudo ip link set webserver up
-    - sudo ip addr add 1.1.1.1/32 dev webserver
-    - sudo ip addr add 1.1.1.2/32 dev webserver
-    - sudo ip addr add 1.1.1.3/32 dev webserver
-    - mkdir /tmp/htdocs
-    - sudo modprobe ip_vs
     - sudo service mongodb stop
     - sudo service rabbitmq-server stop
     - sudo service couchdb stop
