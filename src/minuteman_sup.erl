@@ -26,8 +26,7 @@ get_children() ->
     [
         ?CHILD(minuteman_network_sup, supervisor),
         ?CHILD(minuteman_mesos_poller, worker),
-        ?CHILD(minuteman_lashup_publish, worker),
-        ?CHILD(minuteman_lashup_index, worker)
+        ?CHILD(minuteman_lashup_publish, worker)
     ].
 
 init([]) ->

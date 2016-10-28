@@ -159,45 +159,32 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 check_metadata() ->
-  NodeMetadata = lashup_kv:value([node_metadata, node()]),
+  NodeMetadata = lashup_kv:value(?NODEMETADATA_KEY),
   NodeMetadataDict = orddict:from_list(NodeMetadata),
   Ops = check_ip(NodeMetadataDict, []),
-  Ops1 = check_node_id(NodeMetadata, Ops),
   lager:debug("Performing ops: ~p", [Ops]),
-  perform_ops(Ops1).
+  perform_ops(Ops).
 
 perform_ops([]) ->
   ok;
 perform_ops(Ops) ->
-  {ok, _} = lashup_kv:request_op([node_metadata, node()], {update, Ops}).
-
-
-check_node_id(NodeMetadata, Ops) ->
-  ID = lashup_gm:id(),
-  check_node_id(ID, NodeMetadata, Ops).
-
-check_node_id(ID, NodeMetadata, Ops) ->
-  case orddict:find(?ID_FIELD, NodeMetadata) of
-    {ok, ID} ->
-      Ops;
-    _ ->
-      [{update, ?ID_FIELD, {assign, ID, erlang:system_time(nano_seconds)}}|Ops]
-  end.
+  {ok, _} = lashup_kv:request_op(?NODEMETADATA_KEY, {update, Ops}).
 
 check_ip(NodeMetadata, Ops) ->
   IP = get_ip(),
   check_ip(IP, NodeMetadata, Ops).
 
 check_ip(IP, NodeMetadata, Ops) ->
-  case orddict:find(?IP_FIELD, NodeMetadata) of
-    {ok, IP} ->
+  Node = node(),
+  case orddict:find(?LWW_REG(IP), NodeMetadata) of
+    {ok, Node} ->
       Ops;
     _ ->
-      set_ip(IP, Ops)
+      set_ip(IP, Node, Ops)
   end.
 
-set_ip(IP, Ops) ->
-  [{update, ?IP_FIELD, {assign, IP, erlang:system_time(nano_seconds)}}|Ops].
+set_ip(IP, Node, Ops) ->
+  [{update, ?LWW_REG(IP), {assign, Node, erlang:system_time(nano_seconds)}}|Ops].
 
 
 get_ip() ->

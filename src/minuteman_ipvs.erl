@@ -12,7 +12,9 @@
 -behaviour(gen_statem).
 
 
+-include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("gen_netlink/include/netlink.hrl").
+-include("minuteman_lashup.hrl").
 -define(SERVER, ?MODULE).
 
 -record(state, {
@@ -20,12 +22,16 @@
     netlink_generic :: pid(),
     netlink_rt      :: pid(),
     family,
-    if_idx
+    if_idx,
+    route_events_ref,
+    kv_ref,
+    ip_mapping = #{}:: map(),
+    tree            :: lashup_gm_route:tree() | undefined
 }).
 
 -type state_data() :: #state{}.
 
--type state_name() :: uninitialized | initialized.
+-type state_name() :: uninitialized | initialized | notree.
 
 -define(IP_VS_CONN_F_FWD_MASK, 16#7).       %%  mask for the fwd methods
 -define(IP_VS_CONN_F_MASQ, 16#0).           %%  masquerading/NAT
@@ -71,13 +77,15 @@ start_link() ->
 
 -spec(init([]) -> {ok, state_name(), state_data()}).
 init([]) ->
+    {ok, KVRef} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?NODEMETADATA_KEY}) -> true end)),
+    {ok, Ref} = lashup_gm_route_events:subscribe(),
     {ok, Pid} = minuteman_netlink:start_link(),
     {ok, Family} = minuteman_netlink:get_family(Pid, "IPVS"),
     {ok, PidRT} = minuteman_netlink:start_link(?NETLINK_ROUTE),
     State0 = #state{family = Family, netlink_generic = Pid, netlink_rt = PidRT},
     IfIdx = if_idx(?MINUTEMAN_IFACE, State0),
-    State1 = State0#state{if_idx = IfIdx},
-    {ok, uninitialized, State1}.
+    State1 = State0#state{if_idx = IfIdx, route_events_ref = Ref, kv_ref = KVRef},
+    {ok, notree, State1}.
 
 terminate(Reason, State, Data) ->
     lager:warning("Terminating, due to: ~p, in state: ~p, with state data: ~p", [Reason, State, Data]).
@@ -97,6 +105,15 @@ callback_mode() ->
 %% Then we we redeliver the event for further processing
 %% VIPs are in the structure [{{protocol(), inet:ipv4_address(), port_num}, [{inet:ipv4_address(), port_num}]}]
 %% [{{tcp,{1,2,3,4},80},[{{33,33,33,2},20320}]}]
+handle_event(info, {lashup_kv_events, Event = #{ref := Ref}}, _StateName, State0 = #state{kv_ref = Ref}) ->
+    State1 = handle_ip_event(Event, State0),
+    {keep_state, State1};
+handle_event(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, notree,
+    State0 = #state{route_events_ref = Ref}) ->
+    State1 = State0#state{tree = Tree},
+    {next_state, uninitialized, State1};
+handle_event(_, _, notree, _State0) ->
+    {keep_state_and_data, postpone};
 handle_event(cast, {vips, VIPsUnsorted}, uninitialized, State0 = #state{}) ->
     VIPs = sort_vips(VIPsUnsorted),
     reconcile_vips(VIPs, State0),
@@ -104,13 +121,11 @@ handle_event(cast, {vips, VIPsUnsorted}, uninitialized, State0 = #state{}) ->
     reconcile_backends(VIPs, State0),
     State1 = State0#state{last_configured = VIPs},
     {next_state, initialized, State1};
+handle_event(info, {lashup_gm_route_events, _}, uninitialized, _State) -> {keep_state_and_data, postpone};
 handle_event(cast, {vips, VIPsNewUnsorted}, initialized, State = #state{last_configured = VIPsOld}) ->
     VIPsNew = sort_vips(VIPsNewUnsorted),
     transition_vips_and_interfaces(VIPsOld, VIPsNew, State),
-    {next_state, initialized, State};
-handle_event(EventType, EventContent, StateName, StateData) ->
-    lager:info("~p; ~p; ~p; ~p", [EventType, EventContent, StateName, StateData]),
-    keep_state_and_data.
+    {next_state, initialized, State}.
 
 sort_vips(VIPs0) ->
     VIPs1 = orddict:from_list(VIPs0),
@@ -148,7 +163,8 @@ services_to_reconcile(InstalledServices, VIPsAndBackends) ->
 
 
 reconcile_service({Service, {_VIP, Backends}}, State) ->
-    reconcile_service(Service, Backends, State).
+    ReachableBackends = reachable_backends(Backends, State),
+    reconcile_service(Service, ReachableBackends, State).
 
 reconcile_service(Service, Backends, State) ->
     lager:info("Reconciling service: ~p", [Service]),
@@ -374,4 +390,30 @@ backend_address(Service) ->
         inet ->
             InetAddr = list_to_tuple(lists:sublist(AddressList, 4)),
             {InetAddr, Port}
+    end.
+
+handle_ip_event(#{value := Value}, State0) ->
+    IPToNodeName = [{IP, NodeName} || {?LWW_REG(IP), NodeName} <- Value],
+    IPMapping = maps:from_list(IPToNodeName),
+    State0#state{ip_mapping = IPMapping}.
+
+
+reachable_backends(Backends, State) ->
+    reachable_backends(Backends, [], [], State).
+
+reachable_backends([], _OpenBackends = [], ClosedBackends, _State) ->
+    ClosedBackends;
+reachable_backends([], OpenBackends, _ClosedBackends, _State) ->
+    OpenBackends;
+reachable_backends([BE = {IP, _Port}|Rest], OB, CB, State = #state{ip_mapping = IPMapping, tree = Tree}) ->
+    case IPMapping of
+        #{IP := NodeName} ->
+            case lashup_gm_route:distance(NodeName, Tree) of
+                infinity ->
+                    reachable_backends(Rest, OB, [BE|CB], State);
+                _ ->
+                    reachable_backends(Rest, [BE|OB], CB, State)
+            end;
+        _ ->
+            reachable_backends(Rest, OB, [BE|CB], State)
     end.
