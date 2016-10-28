@@ -14,7 +14,8 @@
                   lashup,
                   telemetry,
                   dns,
-                  mesos_state
+                  mesos_state,
+                  procket
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}
