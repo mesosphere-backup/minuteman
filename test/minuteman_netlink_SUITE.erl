@@ -18,14 +18,8 @@
 %% API
 -export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2]).
 
-all() -> all(os:cmd("id -u"), os:getenv("CIRCLECI")).
-
 %% root tests
-all("0\n", false) ->
-    [test_basic, enc_generic];
-
-%% non root tests
-all(_, _) -> [enc_generic].
+all() -> [test_basic, enc_generic].
 
 init_per_testcase(enc_generic, Config) ->
     Config;

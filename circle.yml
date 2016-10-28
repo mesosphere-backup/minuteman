@@ -24,7 +24,7 @@ dependencies:
 test:
   override:
     - make check
-    - sudo bash -c 'source ~/extras/otp/19.1/activate && make check'
+    - sudo -E PATH=${PATH} make check
     - ./elvis rock
   post:
     - git clone https://github.com/idubrov/covertool
