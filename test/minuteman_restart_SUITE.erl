@@ -12,6 +12,7 @@ all("0\n") -> [test_restart];
 all(_) -> [].
 
 test_restart(_Config) ->
+  application:set_env(minuteman, enable_networking, false),
   {ok, _} = application:ensure_all_started(minuteman),
   ok = application:stop(minuteman),
   {ok, _} = application:ensure_all_started(minuteman),
