@@ -246,7 +246,6 @@ reconcile_vips(VIPsAndBackends, State) ->
 services_to_delete(InstalledServices, VIPs) ->
     lists:filter(fun(Service) -> not lists:member(service_address(Service), VIPs) end, InstalledServices).
 
-%% TODO: Delete IP from Minuteman interface *first*
 delete_service(Service, #state{family = Family, netlink_generic = Pid}) ->
     lager:info("Deleting service: ~p~n", [Service]),
     {ok, _} = minuteman_netlink:request(Pid, Family, ipvs, [], #del_service{request = [{service, Service}]}).
@@ -256,18 +255,19 @@ vips_to_add(InstalledServices0, VIPs) ->
     InstalledServices1 = lists:map(fun service_address/1, InstalledServices0),
     ordsets:subtract(ordsets:from_list(VIPs), ordsets:from_list(InstalledServices1)).
 
-%% TODO: Add IP to minuteman interface *after*
-% 14:23:19.251 [minuteman_ipvs:177]  [debug] Service: [[{address_family,2},{protocol,6},{address,<<7,7,7,7,0,0,0,0,0,0,0,0,0,0,0,0>>},{port,6666},{sched_name,"wlc"},{flags,2,4294967295},{timeout,0},{netmask,4294967295},{stats,[{conns,22},{inpkts,73},{outpkts,3},{inbytes,4351},{outbytes,164},{cps,0},{inpps,0},{outpps,0},{inbps,0},{outbps,0}]},{stats64,[{conns,22},{inpkts,73},{outpkts,3},{inbytes,4351},{outbytes,164},{cps,0},{inpps,0},{outpps,0},{inbps,0},{outbps,0}]}],[{address_family,2},{protocol,6},{address,<<7,7,7,7,0,0,0,0,0,0,0,0,0,0,0,0>>},{port,80},{sched_name,"wlc"},{flags,2,4294967295},{timeout,0},{netmask,4294967295},{stats,[{conns,1},{inpkts,5},{outpkts,0},{inbytes,300},{outbytes,0},{cps,0},{inpps,0},{outpps,0},{inbps,0},{outbps,0}]},{stats64,[{conns,1},{inpkts,5},{outpkts,0},{inbytes,300},{outbytes,0},{cps,0},{inpps,0},{outpps,0},{inbps,0},{outbps,0}]}]]
-
-
 add_vip({tcp, IP, Port}, #state{family = Family, netlink_generic = Pid}) ->
     Flags = 0,
-    Service0 = [{protocol, netlink_codec:protocol_to_int(tcp)}, {port, Port}, {sched_name, "wlc"}, {netmask, 16#ffffffff}, {flags, Flags, 16#ffffffff}, {timeout, 0}],
+    Service0 = [
+        {protocol, netlink_codec:protocol_to_int(tcp)},
+        {port, Port}, {sched_name, "wlc"},
+        {netmask, 16#ffffffff},
+        {flags, Flags, 16#ffffffff},
+        {timeout, 0}
+    ],
     Service1 = ip_to_address(IP) ++ Service0,
     lager:info("Adding Service: ~p", [Service1]),
     {ok, _} = minuteman_netlink:request(Pid, Family, ipvs, [], #new_service{request = [{service, Service1}]}).
 
-%02:37:43.920 [minuteman_ipvs:158]  [info] Deleting Backend: [{address,<<216,58,194,174,0,0,0,0,0,0,0,0,0,0,0,0>>},{port,80},{fwd_method,0},{weight,1},{u_threshold,0},{l_threshold,0},{active_conns,0},{inact_conns,0},{persist_conns,0},{addr_family,2},{stats,[{conns,1},{inpkts,6},{outpkts,5},{inbytes,331},{outbytes,744},{cps,0},{inpps,0},{outpps,0},{inbps,0},{outbps,0}]},{stats64,[{conns,1},{inpkts,6},{outpkts,5},{inbytes,331},{outbytes,744},{cps,0},{inpps,0},{outpps,0},{inbps,0},{outbps,0}]}]
 add_backend_to_service(BE = {IP, Port}, Service, #state{family = Family, netlink_generic = Pid}) ->
     Base = [{fwd_method, ?IP_VS_CONN_F_MASQ}, {weight, 1}, {u_threshold, 0}, {l_threshold, 0}],
     Dest = [{port, Port}] ++ Base ++ ip_to_address(IP),
@@ -319,7 +319,10 @@ transition_service(Service, VIPsOld, VIPsNew, State) ->
 delete_old_vips_and_interfaces(VIPsOld, VIPsNew, State) ->
     InstalledServices = installed_services(State),
     VIPsToDelete = ordsets:subtract(orddict:fetch_keys(VIPsOld), orddict:fetch_keys(VIPsNew)),
-    ServicesToDelete = lists:filter(fun(Service) -> lists:member(service_address(Service), VIPsToDelete) end, InstalledServices),
+    ServicesToDelete =
+        lists:filter(
+            fun(Service) -> lists:member(service_address(Service), VIPsToDelete) end,
+            InstalledServices),
     lists:foreach(fun(Service) -> delete_service(Service, State) end, ServicesToDelete),
     IPsToDelete = [IP || {_Protocol, IP, _Port} <- VIPsToDelete],
     lists:foreach(fun(IP) -> del_ip(IP, State) end, IPsToDelete).
