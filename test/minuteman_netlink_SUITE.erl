@@ -22,7 +22,7 @@ all() -> all(os:cmd("id -u"), os:getenv("CIRCLECI")).
 
 %% root tests
 all("0\n", false) ->
-    [test_basic];
+    [test_basic, enc_generic];
 
 %% non root tests
 all(_, _) -> [enc_generic].
