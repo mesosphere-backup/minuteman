@@ -29,11 +29,17 @@ start_link() ->
   supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 
+maybe_ipvs_child() ->
+  case minuteman_config:networking() of
+    true ->
+       [?CHILD(minuteman_ipvs, worker)];
+    false ->
+      []
+  end.
+
 init([]) ->
-  Children =
-  [
-      ?CHILD(minuteman_ipvs, worker),
-      ?CHILD(minuteman_lashup_vip_listener, worker)
+  Children = maybe_ipvs_child () ++ [
+    ?CHILD(minuteman_lashup_vip_listener, worker)
   ],
   {ok,
     {
