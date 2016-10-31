@@ -93,8 +93,10 @@ splay_ms() ->
 %% implementation
 -spec(check_connections() -> ok).
 check_connections() ->
-    Conns = ip_vs_conn_monitor:get_connections(),
+    {ok, Conns} = ip_vs_conn_monitor:get_connections(),
+    ct:pal("got connections ~p", [Conns]),
     Parsed = maps:fold(fun(K,V,Z) -> [{ip_vs_conn:parse(K),V}|Z] end, [], Conns),
+    ct:pal("got parsed ~p", [Parsed]),
     lists:foreach(fun check_connections/1, Parsed).
 
 -spec(check_connections({#ip_vs_conn{}, #ip_vs_conn_status{}}) -> ok).
@@ -112,15 +114,19 @@ check_connections({#ip_vs_conn{from_ip = IP, from_port = Port, to_ip = VIP, to_p
     telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
     telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta).
 
--spec(named_tags(IP :: inet:ip4_address(),
+-spec(named_tags(IIP :: integer(),
                  Port :: inet:port_numbrer(),
-                 VIP :: inet:ip4_address(),
+                 IVIP :: integer(),
                  VIPPort :: inet:port_numbrer()) -> map:map()).
-named_tags(IP, Port, VIP, VIPPort) ->
+named_tags(IIP, Port, IVIP, VIPPort) ->
+    IP = int_to_ip(IIP),
+    VIP = int_to_ip(IVIP),
     case minuteman_lashup_vip_listener:lookup_vips([{ip, VIP}]) of
         [{name, VIPName}] -> #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port), name => VIPName};
         _ -> #{vip => fmt_ip_port(VIP, VIPPort), backend => fmt_ip_port(IP, Port)}
     end.
+
+int_to_ip(Int) -> minuteman_lashup_vip_listener:integer_to_ip(Int).
 
 -spec(fmt_ip_port(IP :: inet:ip4_address(), Port :: inet:port_number()) -> binary()).
 fmt_ip_port(IP, Port) ->

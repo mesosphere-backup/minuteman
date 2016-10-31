@@ -13,6 +13,7 @@
 
 %% API
 -export([start_link/0]).
+-export([integer_to_ip/1]).
 
 %% gen_server callbacks
 -export([init/1,
