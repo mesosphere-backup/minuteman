@@ -10,9 +10,8 @@ dependencies:
     - .cache
     - ~/.cache
   pre:
-    - sudo service mongodb stop
+    - sudo service mongod stop
     - sudo service rabbitmq-server stop
-    - sudo service couchdb stop
     - sudo service zookeeper stop
     - sudo service mysql stop
     - sudo service postgresql stop
