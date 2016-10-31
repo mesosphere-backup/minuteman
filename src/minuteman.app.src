@@ -15,7 +15,8 @@
                   telemetry,
                   dns,
                   mesos_state,
-                  procket
+                  procket,
+                  ip_vs_conn
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}
