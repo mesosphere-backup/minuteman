@@ -100,19 +100,32 @@ check_connections() ->
     lists:foreach(fun check_connections/1, Parsed).
 
 -spec(check_connections({#ip_vs_conn{}, #ip_vs_conn_status{}}) -> ok).
-check_connections({#ip_vs_conn{from_ip = IP, from_port = Port, to_ip = VIP, to_port = VIPPort},
-                   #ip_vs_conn_status{tcp_state = syn_recv}}) ->
+check_connections({Conn, #ip_vs_conn_status{tcp_state = syn_recv}}) ->
+    conn_failed(Conn);
+check_connections({Conn, Status = #ip_vs_conn_status{tcp_state = time_wait}}) ->
+    conn_success(Conn, Status);
+check_connections({Conn, Status = #ip_vs_conn_status{tcp_state = close_wait}}) ->
+    conn_success(Conn, Status);
+check_connections({Conn, Status = #ip_vs_conn_status{tcp_state = established}}) ->
+    conn_success(Conn, Status).
+
+-spec(conn_failed(#ip_vs_conn{}) -> ok).
+conn_failed(#ip_vs_conn{from_ip = IP, from_port = Port,
+                        to_ip = VIP, to_port = VIPPort}) ->
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
-    telemetry:counter(mm_connect_failures, Tags, AggTags, 1);
+    telemetry:counter(mm_connect_failures, Tags, AggTags, 1).
 
-check_connections({#ip_vs_conn{from_ip = IP, from_port = Port, to_ip = VIP, to_port = VIPPort},
-                   #ip_vs_conn_status{tcp_state = established, time_ns = Time}}) ->
+-spec(conn_success(#ip_vs_conn{}, #ip_vs_conn_status{}) -> ok).
+conn_success(#ip_vs_conn{from_ip = IP, from_port = Port,
+                         to_ip = VIP, to_port = VIPPort},
+             #ip_vs_conn_status{time_ns = Time}) ->
     TimeDelta = erlang:monotonic_time(nano_seconds) - Time,
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
     telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta).
+
 
 -spec(named_tags(IIP :: integer(),
                  Port :: inet:port_numbrer(),
