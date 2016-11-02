@@ -21,6 +21,7 @@
 
 -record(state, {
     last_configured_vips = [],
+    last_received_vips = [],
     route_mgr,
     ipvs_mgr,
     route_events_ref,
@@ -108,9 +109,12 @@ reconcile(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_re
 maintain(cast, {vips, VIPs}, State0) ->
     State1 = maintain(VIPs, State0),
     {keep_state, State1};
+maintain(internal, maintain, State0 = #state{last_received_vips = VIPs}) ->
+    State1 = maintain(VIPs, State0),
+    {keep_state, State1};
 maintain(info, {lashup_gm_route_events, #{ref := Ref, tree := Tree}}, State0 = #state{route_events_ref = Ref}) ->
     State1 = State0#state{tree = Tree},
-    {keep_state, State1};
+    {keep_state, State1, {next_event, internal, maintain}};
 maintain(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref = Ref}) ->
     State1 = handle_ip_event(Event, State0),
     {keep_state, State1}.
@@ -136,7 +140,7 @@ do_reconcile_services(VIPs0, State0 = #state{ipvs_mgr = _IPVSMgr}) ->
     VIPs1 = process_reachability(VIPs0, State0),
     Diff = generate_diff(InstalledState, VIPs1),
     apply_diff(Diff, State0),
-    State0#state{last_configured_vips = VIPs1}.
+    State0#state{last_received_vips = VIPs0, last_configured_vips = VIPs1}.
 
 apply_diff({ServicesToAdd, ServicesToRemove, ServicesToModify}, State) ->
     lists:foreach(fun({VIP, _BEs}) -> remove_service(VIP, State) end, ServicesToRemove),
@@ -180,7 +184,7 @@ maintain(VIPs0, State0 = #state{last_configured_vips = LastConfigured}) ->
     lager:debug("Diff: ~p", [Diff]),
     apply_diff(Diff, State0),
     do_reconcile_routes(VIPs1, State0),
-    State0#state{last_configured_vips = VIPs1}.
+    State0#state{last_configured_vips = VIPs1, last_received_vips = VIPs0}.
 
 
 %% Returns {VIPsToRemove, VIPsToAdd, [VIP, BackendsToRemove, BackendsToAdd]}
