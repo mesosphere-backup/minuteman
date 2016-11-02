@@ -81,6 +81,6 @@ routes() ->
 
 test_route_mgr(_Config) ->
     {ok, Pid} = minuteman_route_mgr:start_link(),
-    minuteman_route_mgr:update_routes(Pid, [{1,2,3,4}]),
+    minuteman_route_mgr:update_routes(Pid, [{1, 2, 3, 4}]),
     ["1.2.3.4 dev lo  scope link"] = routes(),
     [] = minuteman_route_mgr:update_routes(Pid, []).

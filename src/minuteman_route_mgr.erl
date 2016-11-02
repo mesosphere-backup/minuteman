@@ -213,7 +213,7 @@ ensure_fib_rule(Pid) ->
     Match = [Msg || #rtnetlink{msg = Msg} <- Rules, proplists:get_value(table, element(10, Msg)) == ?MINUTEMAN_TABLE],
     case Match of
         [] ->
-            Msg = [{src, <<>>}, {priority,10000}, {table, ?MINUTEMAN_TABLE}],
+            Msg = [{src, <<>>}, {priority, 10000}, {table, ?MINUTEMAN_TABLE}],
             Rule = {
                 inet,
                 _PrefixLen = 0,
