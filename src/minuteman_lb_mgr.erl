@@ -47,9 +47,8 @@
 -export([notree/3, no_ips/3, reconcile/3, maintain/3]).
 
 push_vips(VIPs0) ->
-    VIPs1 = lists:usort(VIPs0),
-    VIPs2 = lists:map(fun({VIP, Backends}) -> {VIP, lists:usort(Backends)} end, VIPs1),
-    gen_statem:cast(?SERVER, {vips, VIPs2}).
+    VIPs1 = ordsets:from_list(VIPs0),
+    gen_statem:cast(?SERVER, {vips, VIPs1}).
 
 start_link() ->
     gen_statem:start_link({local, ?SERVER}, ?MODULE, [], []).
@@ -196,8 +195,10 @@ generate_diff([{VIP, BE}|RestLhs], [{VIP, BE}|RestRhs], VIPsToAdd, VIPsToRemove,
     generate_diff(RestLhs, RestRhs, VIPsToAdd, VIPsToRemove, Mutations);
 %% VIPs are equal, but the backends are different, prepare a mutation entry
 generate_diff([{VIP, BELhs}|RestLhs], [{VIP, BERhs}|RestRhs], VIPsToAdd, VIPsToRemove, Mutations0) ->
-    BEToAdd = ordsets:subtract(BERhs, BELhs),
-    BEToRemove = ordsets:subtract(BELhs, BERhs),
+    BERhs1 = ordsets:from_list(BERhs),
+    BELhs1 = ordsets:from_list(BELhs),
+    BEToAdd = ordsets:subtract(BERhs1, BELhs1),
+    BEToRemove = ordsets:subtract(BELhs1, BERhs1),
     Mutation = {VIP, BEToAdd, BEToRemove},
     generate_diff(RestLhs, RestRhs, VIPsToAdd, VIPsToRemove, [Mutation|Mutations0]);
 %% New VIP
@@ -246,6 +247,52 @@ generate_diffs_test() ->
     ?assertEqual({[], [{b, [1, 2, 3]}], []}, generate_diff([{b, [1, 2, 3]}], [])),
     ?assertEqual({[{b, [1, 2, 3]}], [], []}, generate_diff([], [{b, [1, 2, 3]}])),
     ?assertEqual({[], [], []}, generate_diff([{a, [1, 2, 3]}], [{a, [1, 2, 3]}])),
-    ?assertEqual({[{b, []}], [{a, []}, {c, []}], []}, generate_diff([{a, []}, {c, []}], [{b, []}])).
+    ?assertEqual({[{b, []}], [{a, []}, {c, []}], []}, generate_diff([{a, []}, {c, []}], [{b, []}])),
+    Diff1 =
+        generate_diff(
+            [
+                {
+                    {tcp, {11, 136, 231, 163}, 80},
+                    [
+                        {{10, 0, 3, 98}, 8895},
+                        {{10, 0, 1, 107}, 16319},
+                        {{10, 0, 1, 107}, 3892}
+                    ]
+                }
+            ],
+            [
+                {{tcp, {11, 136, 231, 163}, 80},
+                    [
+                        {{10, 0, 3, 98}, 8895},
+                        {{10, 0, 1, 107}, 16319},
+                        {{10, 0, 1, 107}, 15671},
+                        {{10, 0, 1, 107}, 3892}
+                    ]
+                }
+            ]),
+    ?assertEqual({[], [], [{{tcp, {11, 136, 231, 163}, 80}, [{{10, 0, 1, 107}, 15671}], []}]}, Diff1),
+    Diff2 =
+        generate_diff(
+            [
+                {
+                    {tcp,{11,136,231,163},80},
+                    [
+                        {{10,0,3,98},23520},
+                        {{10,0,3,98},1132}
+                    ]
+                }
+            ],
+            [
+                {
+                    {tcp,{11,136,231,163},80},
+                    [
+                        {{10,0,3,98},23520},
+                        {{10,0,3,98},12930},
+                        {{10,0,3,98},1132},
+                        {{10,0,1,107},18818}
+                    ]
+                }
+            ]),
+        ?debugFmt("Diff2: ~p", [Diff2]).
 
 -endif.
