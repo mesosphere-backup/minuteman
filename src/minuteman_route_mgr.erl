@@ -4,15 +4,15 @@
 %%% @doc
 %%%
 %%% @end
-%%% Created : 01. Nov 2016 7:39 AM
+%%% Created : 02. Nov 2016 9:36 AM
 %%%-------------------------------------------------------------------
--module(minuteman_iface_mgr).
+-module(minuteman_route_mgr).
 -author("sdhillon").
 
 -behaviour(gen_server).
 
 %% API
--export([start_link/1, add_ip/2, remove_ip/2, get_ips/1]).
+-export([start_link/0, update_routes/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -25,29 +25,22 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-    netlink_rt      :: pid(),
-    if_idx,
-    iface_name
+    netlink :: pid(),
+    routes :: ordsets:ordset()
 }).
--type state() :: #state{}.
+
+-type state() :: state().
 -include_lib("gen_netlink/include/netlink.hrl").
+-define(MINUTEMAN_TABLE, 52).
+-define(IFIDX_LO, 1).
+
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
--spec(add_ip(Pid :: pid(), IP :: inet:ip4_address()) -> ok | error).
-add_ip(Pid, IP) ->
-    gen_server:call(Pid, {add_ip, IP}).
-
--spec(remove_ip(Pid :: pid(), IP :: inet:ip4_address()) -> ok | error).
-remove_ip(Pid, IP) ->
-    gen_server:call(Pid, {remove_ip, IP}).
-
--spec(get_ips(Pid :: pid()) -> [inet:ip4_address()]).
-get_ips(Pid) ->
-    gen_server:call(Pid, get_ips).
-
+update_routes(Pid, Routes) ->
+    gen_server:call(Pid, {update_routes, Routes}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -55,10 +48,10 @@ get_ips(Pid) ->
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link(InterfaceName :: string()) ->
+-spec(start_link() ->
     {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(InterfaceName) ->
-    gen_server:start_link(?MODULE, [InterfaceName], []).
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -76,14 +69,13 @@ start_link(InterfaceName) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec(init(Args :: term()) ->
-    {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
+    {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([InterfaceName]) ->
+init([]) ->
     {ok, Pid} = minuteman_netlink:start_link(?NETLINK_ROUTE),
-    State0 = #state{netlink_rt = Pid, iface_name = InterfaceName},
-    IfIdx = if_idx(InterfaceName, State0),
-    State1 = State0#state{if_idx = IfIdx},
-    {ok, State1}.
+    Routes = get_routes(Pid),
+    ensure_fib_rule(Pid),
+    {ok, #state{netlink = Pid, routes = Routes}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -100,16 +92,11 @@ init([InterfaceName]) ->
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: state()} |
     {stop, Reason :: term(), NewState :: state()}).
-
-handle_call(get_ips, _From, State) ->
-    Reply = handle_get_ips(State),
-    {reply, Reply, State};
-handle_call({add_ip, IP}, _From, State) ->
-    Reply = handle_add_ip(IP, State),
-    {reply, Reply, State};
-handle_call({remove_ip, IP}, _From, State) ->
-    Reply = handle_remove_ip(IP, State),
-    {reply, Reply, State}.
+handle_call({update_routes, Routes}, _From, State0) ->
+    State1 = handle_update_routes(Routes, State0),
+    {reply, ok, State1};
+handle_call(_Request, _From, State) ->
+    {reply, ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -176,50 +163,73 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-if_idx(InterfaceName, #state{netlink_rt = Pid}) ->
-    Msg = if_idx_msg(InterfaceName),
-    {ok, [#rtnetlink{msg = Reply}]} = minuteman_netlink:rtnl_request(Pid, getlink, [], Msg),
-    {_Family, _Type, Index, _Flags, _Change, _Req} = Reply,
-    Index.
+get_routes(Pid) ->
+    {ok, Raw} = minuteman_netlink:rtnl_request(Pid, getroute, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
+    Routes0 =
+        [proplists:get_value(dst, element(10, Msg)) ||
+            #rtnetlink{msg = Msg} <- Raw, element(5, Msg) == ?MINUTEMAN_TABLE],
+    ordsets:from_list(Routes0).
 
-if_idx_msg(InterfaceName) ->
-    {
-        _Family = packet,
-        _Type = arphrd_ether,
-        _Index = 0,
+handle_update_routes(NewRoutes, State0 = #state{routes = OldRoutes}) ->
+    RoutesToDelete = ordsets:subtract(OldRoutes, NewRoutes),
+    RoutesToAdd = ordsets:subtract(NewRoutes, OldRoutes),
+    lists:foreach(fun(Route) -> add_route(Route, State0) end, RoutesToAdd),
+    lists:foreach(fun(Route) -> remove_route(Route, State0) end, RoutesToDelete),
+    State0#state{routes = NewRoutes}.
+
+add_route(Dst, #state{netlink = Pid}) ->
+    Msg = [{table, ?MINUTEMAN_TABLE}, {dst, Dst}, {oif, ?IFIDX_LO}],
+    Route = {
+        inet,
+        _PrefixLen = 32,
+        _SrcPrefixLen = 0,
+        _Tos = 0,
+        _Table = ?MINUTEMAN_TABLE,
+        _Protocol = boot,
+        _Scope = link,
+        _Type = unicast,
         _Flags = [],
-        _Change = [],
-        _Req = [
-            {ifname, InterfaceName},
-            {ext_mask, 1}
-        ]
-    }.
+        Msg},
+    {ok, _} = minuteman_netlink:rtnl_request(Pid, newroute, [create, excl], Route).
 
-handle_get_ips(#state{iface_name = StateIFaceName}) ->
-    {ok, IFaceAddrs} = inet:getifaddrs(),
-    [IFaceOpts] = [IfaceOpts || {IFaceName, IfaceOpts} <- IFaceAddrs, string:equal(IFaceName, StateIFaceName)],
-    [Addr || {addr, Addr} <- IFaceOpts, size(Addr) == 4].
+remove_route(Dst, #state{netlink = Pid}) ->
+    Msg = [{table, ?MINUTEMAN_TABLE}, {dst, Dst}, {oif, ?IFIDX_LO}],
+    Route = {
+        inet,
+        _PrefixLen = 32,
+        _SrcPrefixLen = 0,
+        _Tos = 0,
+        _Table = ?MINUTEMAN_TABLE,
+        _Protocol = boot,
+        _Scope = link,
+        _Type = unicast,
+        _Flags = [],
+        Msg},
+    {ok, _} = minuteman_netlink:rtnl_request(Pid, delroute, [], Route).
 
-handle_remove_ip(IP, #state{netlink_rt = Pid, if_idx = Index, iface_name = IFaceName}) ->
-    lager:info("Removing IP ~p from interface: ~p", [IP, IFaceName]),
-    Req = [{address, IP}, {local, IP}],
-    Msg =  {_Family = inet, _PrefixLen = 32, _Flags = 0, _Scope = 0, Index, Req},
-    case minuteman_netlink:rtnl_request(Pid, deladdr, [], Msg) of
-        {ok, _} ->
-            ok;
-        Error ->
-            lager:error("Failed to remove ip: ~p", [Error]),
-            error
+ensure_fib_rule(Pid) ->
+    {ok, Rules} = minuteman_netlink:rtnl_request(Pid, getrule, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
+    %% See if there is a rule that goes to table ?MINUTEMAN_TABLE
+    Match = [Msg || #rtnetlink{msg = Msg} <- Rules, proplists:get_value(table, element(10, Msg)) == ?MINUTEMAN_TABLE],
+    case Match of
+        [] ->
+            Msg = [{src, <<>>}, {priority,10000}, {table, ?MINUTEMAN_TABLE}],
+            Rule = {
+                inet,
+                _PrefixLen = 0,
+                _SrcPrefixLen = 0,
+                _Tos = 0,
+                _Table = ?MINUTEMAN_TABLE,
+                _Protocol = unspec,
+                _Scope = universe,
+                _Type = unicast,
+                _Flags = [],
+                Msg
+            },
+            minuteman_netlink:rtnl_request(Pid, newrule, [create, excl], Rule);
+        _ ->
+            ok
     end.
 
-handle_add_ip(IP, #state{netlink_rt = Pid, if_idx = Index, iface_name = IFaceName}) ->
-    lager:info("Adding IP ~p to interface: ~p", [IP, IFaceName]),
-    Req = [{address, IP}, {local, IP}],
-    Msg =  {_Family = inet, _PrefixLen = 32, _Flags = 0, _Scope = 0, Index, Req},
-    case minuteman_netlink:rtnl_request(Pid, newaddr, [create, excl], Msg) of
-        {ok, _} ->
-            ok;
-        Error ->
-            lager:error("Failed to add ip: ~p", [Error]),
-            error
-    end.
+
+

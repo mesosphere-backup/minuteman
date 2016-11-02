@@ -16,7 +16,7 @@
 -include_lib("common_test/include/ct.hrl").
 
 %% API
--export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2, test_iface_mgr/1, test_ipvs_mgr/1]).
+-export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2, test_ipvs_mgr/1]).
 
 %% root tests
 all() -> [enc_generic, test_iface_mgr, test_ipvs_mgr].
@@ -51,17 +51,6 @@ enc_generic(_Config) ->
 getfamily(_Config) ->
     {ok, Pid} = minuteman_netlink:start_link(),
     {ok, _Family} = minuteman_netlink:get_family(Pid, "IPVS").
-
-test_iface_mgr(_Config) ->
-    os:cmd("ip link del iface-mgr-test"),
-    os:cmd("ip link add iface-mgr-test type dummy"),
-    "" = os:cmd("ip link set iface-mgr-test up"),
-    {ok, Pid} = minuteman_iface_mgr:start_link("iface-mgr-test"),
-    [] = minuteman_iface_mgr:get_ips(Pid),
-    ok = minuteman_iface_mgr:add_ip(Pid, {4, 4, 4, 4}),
-    [{4, 4, 4, 4}] =  minuteman_iface_mgr:get_ips(Pid),
-    ok = minuteman_iface_mgr:remove_ip(Pid, {4, 4, 4, 4}),
-    [] =  minuteman_iface_mgr:get_ips(Pid).
 
 test_ipvs_mgr(_Config) ->
     %% Reset IPVS State

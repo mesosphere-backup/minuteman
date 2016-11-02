@@ -33,9 +33,9 @@ all(_, _) -> [].
 
 init_per_testcase(_, Config) ->
     "" = os:cmd("ipvsadm -C"),
-    os:cmd("ip link del minuteman"),
-    os:cmd("ip link add minuteman type dummy"),
-    os:cmd("ip link set minuteman up"),
+    "" = os:cmd("ip route flush table 52"),
+    os:cmd("ip rule del lookup 52 priority 10000"),
+    os:cmd("ip rule add lookup 52 priority 10000"),
     os:cmd("ip link del webserver"),
     os:cmd("ip link add webserver type dummy"),
     os:cmd("ip link set webserver up"),

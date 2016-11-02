@@ -21,7 +21,7 @@
 
 -record(state, {
     last_configured_vips = [],
-    iface_mgr,
+    route_mgr,
     ipvs_mgr,
     route_events_ref,
     kv_ref,
@@ -59,8 +59,8 @@ init([]) ->
     {ok, KVRef} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?NODEMETADATA_KEY}) -> true end)),
     {ok, Ref} = lashup_gm_route_events:subscribe(),
     {ok, IPVSMgr} = minuteman_ipvs_mgr:start_link(),
-    {ok, IFaceMgr} = minuteman_iface_mgr:start_link(?MINUTEMAN_IFACE),
-    State = #state{iface_mgr = IFaceMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref, kv_ref = KVRef},
+    {ok, RouteMgr} = minuteman_route_mgr:start_link(),
+    State = #state{route_mgr = RouteMgr, ipvs_mgr = IPVSMgr, route_events_ref = Ref, kv_ref = KVRef},
     {ok, notree, State}.
 
 terminate(Reason, State, Data) ->
@@ -117,17 +117,13 @@ maintain(info, {lashup_kv_events, Event = #{ref := Ref}}, State0 = #state{kv_ref
     {keep_state, State1}.
 
 do_reconcile(VIPs, State0) ->
-    do_reconcile_iface(VIPs, State0),
+    do_reconcile_routes(VIPs, State0),
     do_reconcile_services(VIPs, State0).
 
 %% TODO: Refactor
-do_reconcile_iface(VIPs, #state{iface_mgr = IFaceMgr}) ->
-    IFaceIPs = ordsets:from_list(minuteman_iface_mgr:get_ips(IFaceMgr)),
+do_reconcile_routes(VIPs, #state{route_mgr = RouteMgr}) ->
     ExpectedIPs = ordsets:from_list([VIP || {{_Proto, VIP, _Port}, _Backends} <- VIPs]),
-    IPsToAdd = ordsets:subtract(ExpectedIPs, IFaceIPs),
-    lists:foreach(fun(IP) -> ok = minuteman_iface_mgr:add_ip(IFaceMgr, IP) end, IPsToAdd),
-    IPsToRemove = ordsets:subtract(IFaceIPs, ExpectedIPs),
-    lists:foreach(fun(IP) -> ok = minuteman_iface_mgr:remove_ip(IFaceMgr, IP) end, IPsToRemove).
+    minuteman_route_mgr:update_routes(RouteMgr, ExpectedIPs).
 
 %% Converts IPVS service / dests into our normal minuteman ones
 normalize_services_and_dests({Service0, Destinations0}) ->
@@ -179,12 +175,12 @@ installed_state(#state{ipvs_mgr = IPVSMgr}) ->
 
 maintain(VIPs0, State0 = #state{last_configured_vips = LastConfigured}) ->
     VIPs1 = process_reachability(VIPs0, State0),
-    lager:info("Last Configured: ~p", [LastConfigured]),
-    lager:info("VIPs1: ~p", [VIPs1]),
+    lager:debug("Last Configured: ~p", [LastConfigured]),
+    lager:debug("VIPs1: ~p", [VIPs1]),
     Diff = generate_diff(LastConfigured, VIPs1),
-    lager:info("Diff: ~p", [Diff]),
+    lager:debug("Diff: ~p", [Diff]),
     apply_diff(Diff, State0),
-    do_reconcile_iface(VIPs1, State0),
+    do_reconcile_routes(VIPs1, State0),
     State0#state{last_configured_vips = VIPs1}.
 
 
