@@ -225,7 +225,7 @@ handle_value(VIPs0, State0) ->
     VIPs1 = process_vips(VIPs0, State0),
     State1 = State0#state{vips = VIPs1},
     push_state_to_spartan(State1),
-    minuteman_ipvs:push_vips(VIPs1),
+    minuteman_lb_mgr:push_vips(VIPs1),
     State1.
 
 process_vips(VIPs0, State) ->

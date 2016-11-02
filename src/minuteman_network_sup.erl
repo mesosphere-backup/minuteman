@@ -32,7 +32,7 @@ start_link() ->
 maybe_ipvs_child() ->
   case minuteman_config:networking() of
     true ->
-       [?CHILD(minuteman_ipvs, worker)];
+       [?CHILD(minuteman_lb_mgr, worker)];
     false ->
       []
   end.

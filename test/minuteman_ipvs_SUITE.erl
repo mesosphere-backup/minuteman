@@ -32,6 +32,16 @@ all("0\n", false) ->
 all(_, _) -> [].
 
 init_per_testcase(_, Config) ->
+    "" = os:cmd("ipvsadm -C"),
+    os:cmd("ip link del minuteman"),
+    os:cmd("ip link add minuteman type dummy"),
+    os:cmd("ip link set minuteman up"),
+    os:cmd("ip link del webserver"),
+    os:cmd("ip link add webserver type dummy"),
+    os:cmd("ip link set webserver up"),
+    os:cmd("ip addr add 1.1.1.1/32 dev webserver"),
+    os:cmd("ip addr add 1.1.1.2/32 dev webserver"),
+    os:cmd("ip addr add 1.1.1.3/32 dev webserver"),
     application:set_env(minuteman, agent_polling_enabled, false),
     {ok, _} = application:ensure_all_started(inets),
     {ok, _} = application:ensure_all_started(minuteman),
@@ -41,6 +51,7 @@ end_per_testcase(_, _Config) ->
     ok = application:stop(minuteman).
 
 make_webserver(Idx) ->
+    file:make_dir("/tmp/htdocs"),
     {ok, Pid} = inets:start(httpd, [
         {port, 0},
         {server_name, "httpd_test"},
