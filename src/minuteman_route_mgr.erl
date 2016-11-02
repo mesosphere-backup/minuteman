@@ -230,6 +230,3 @@ ensure_fib_rule(Pid) ->
         _ ->
             ok
     end.
-
-
-

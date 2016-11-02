@@ -16,10 +16,10 @@
 -include_lib("common_test/include/ct.hrl").
 
 %% API
--export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2, test_ipvs_mgr/1]).
+-export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2, test_ipvs_mgr/1, test_route_mgr/1]).
 
 %% root tests
-all() -> [enc_generic, test_iface_mgr, test_ipvs_mgr].
+all() -> [enc_generic, test_ipvs_mgr, test_route_mgr].
 
 init_per_testcase(enc_generic, Config) ->
     Config;
@@ -73,3 +73,14 @@ has_vip(IP, Port) ->
 %    BEEntry0 = io_lib:format("-A -t ~s:~B -r ~s:~B", [inet:ntoa(VIPIP), VIPPort, inet:ntoa(BEIP), BEPort]),
 %    BEEntry1 = lists:flatten(BEEntry0),
 %    0 =/= string:str(Data, BEEntry1).
+
+routes() ->
+    Data = os:cmd("ip route show table 52"),
+    Lines = string:tokens(Data, "\n"),
+    lists:map(fun string:strip/1, Lines).
+
+test_route_mgr(_Config) ->
+    {ok, Pid} = minuteman_route_mgr:start_link(),
+    minuteman_route_mgr:update_routes(Pid, [{1,2,3,4}]),
+    ["1.2.3.4 dev lo  scope link"] = routes(),
+    [] = minuteman_route_mgr:update_routes(Pid, []).
