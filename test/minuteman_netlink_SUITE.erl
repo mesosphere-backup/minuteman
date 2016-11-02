@@ -27,7 +27,7 @@ init_per_testcase(TestCase, Config) ->
     Uid = list_to_integer(string:strip(os:cmd("id -u"), right, $\n)),
     init_per_testcase(Uid, TestCase, Config).
 
-init_per_testcase(0, TestCase, Config) when TestCase == getfamily ->
+init_per_testcase(0, TestCase, Config) when TestCase == getfamily; TestCase == test_ipvs_mgr->
     case file:read_file_info("/sys/module/ip_vs") of
         {ok, _} ->
             Config;
