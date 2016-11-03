@@ -24,6 +24,7 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
+          time = 0 :: integer()
     }).
 
 -spec(start_link() ->
@@ -63,9 +64,10 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(push_metrics, State = #state{}) ->
-    check_connections(),
+    check_connections(State),
     erlang:send_after(splay_ms(), self(), push_metrics),
-    {noreply, State};
+    Now = erlang:monotonic_time(nano_seconds),
+    {noreply, State#state{time = Now}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -91,21 +93,21 @@ splay_ms() ->
     NextMinute + Splay.
 
 %% implementation
--spec(check_connections() -> ok).
-check_connections() ->
+-spec(check_connections(#state{}) -> ok).
+check_connections(State) ->
     {ok, Conns} = ip_vs_conn_monitor:get_connections(),
     Parsed = maps:fold(fun(K,V,Z) -> [{ip_vs_conn:parse(K),V}|Z] end, [], Conns),
-    lists:foreach(fun check_connections/1, Parsed).
+    lists:foreach(fun (C) -> check_connections(State, C) end, Parsed).
 
--spec(check_connections({#ip_vs_conn{}, #ip_vs_conn_status{}}) -> ok).
-check_connections({Conn, #ip_vs_conn_status{tcp_state = syn_recv}}) ->
+-spec(check_connections(#state{}, {#ip_vs_conn{}, #ip_vs_conn_status{}}) -> ok).
+check_connections(_State, {Conn, #ip_vs_conn_status{tcp_state = syn_recv}}) ->
     conn_failed(Conn);
-check_connections({Conn, Status = #ip_vs_conn_status{tcp_state = time_wait}}) ->
-    conn_success(Conn, Status);
-check_connections({Conn, Status = #ip_vs_conn_status{tcp_state = close_wait}}) ->
-    conn_success(Conn, Status);
-check_connections({Conn, Status = #ip_vs_conn_status{tcp_state = established}}) ->
-    conn_success(Conn, Status).
+check_connections(State, {Conn, Status = #ip_vs_conn_status{tcp_state = time_wait}}) ->
+    conn_success(State, Conn, Status);
+check_connections(State, {Conn, Status = #ip_vs_conn_status{tcp_state = close_wait}}) ->
+    conn_success(State, Conn, Status);
+check_connections(State, {Conn, Status = #ip_vs_conn_status{tcp_state = established}}) ->
+    conn_success(State, Conn, Status).
 
 -spec(conn_failed(#ip_vs_conn{}) -> ok).
 conn_failed(#ip_vs_conn{from_ip = IP, from_port = Port,
@@ -114,16 +116,20 @@ conn_failed(#ip_vs_conn{from_ip = IP, from_port = Port,
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_failures, Tags, AggTags, 1).
 
--spec(conn_success(#ip_vs_conn{}, #ip_vs_conn_status{}) -> ok).
-conn_success(#ip_vs_conn{from_ip = IP, from_port = Port,
+-spec(conn_success(#state{}, #ip_vs_conn{}, #ip_vs_conn_status{}) -> ok).
+conn_success(#state{time = Prev}, 
+             #ip_vs_conn{from_ip = IP, from_port = Port,
                          to_ip = VIP, to_port = VIPPort},
              #ip_vs_conn_status{time_ns = Time}) ->
-    TimeDelta = erlang:monotonic_time(nano_seconds) - Time,
+    Now = erlang:monotonic_time(nano_seconds),
+    TimeDelta = time_delta(Prev, Now, Time, Time > Prev),
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
     telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta).
 
+time_delta(_Prev, Now, Time, true) -> Now - Time; 
+time_delta(Prev, Now, _Time, false) -> Now - Prev.
 
 -spec(named_tags(IIP :: integer(),
                  Port :: inet:port_numbrer(),
