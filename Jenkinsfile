@@ -5,6 +5,7 @@ node('mesos') {
     
     myImage.inside("--privileged=true") {
         checkout scm
+        sh 'yum install -y yum install -y kernel-$(uname -r)'
         sh 'ip addr add 1.1.1.1/32 dev lo'
         sh 'ip addr add 1.1.1.2/32 dev lo'
         sh 'ip addr add 1.1.1.3/32 dev lo'
