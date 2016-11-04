@@ -1,6 +1,6 @@
 node('mesos') {
     stage 'build'
-    def centos7 = docker.image('centos7.2.1511');
+    def centos7 = docker.image('centos:7.2.1511');
     centos7.pull();
 
     centos7.inside {
