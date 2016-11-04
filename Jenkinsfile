@@ -15,6 +15,7 @@ node('mesos') {
         sh 'make check'
         sh './elvis rock'
         sh './rebar3 cover'
+        sh ' ./rebar3 covertool generate'
         sh 'codecov -X gcov -f _build/test/covertool/minuteman.covertool.xml'
     }
 }
