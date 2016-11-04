@@ -3,9 +3,9 @@ node('mesos') {
     checkout scm
     def myImage = docker.build "erlang19.1"
     
-    myImage.inside("--privileged=true") {
+    myImage.inside("--privileged=true --net=bridge") {
         checkout scm
-        sh 'yum install -y yum install -y kernel-$(uname -r)'
+        sh 'yum install -y yum install -y kernel-$(uname -r) && yum clean all'
         sh 'ip addr add 1.1.1.1/32 dev lo'
         sh 'ip addr add 1.1.1.2/32 dev lo'
         sh 'ip addr add 1.1.1.3/32 dev lo'
