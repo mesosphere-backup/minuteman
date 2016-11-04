@@ -4,10 +4,6 @@ node('mesos') {
     def myImage = docker.build "erlang19.1"
     
     myImage.inside {
-        sh 'yum install -y wget'
-        sh 'yum groupinstall -y "Development Tools" "Development Libraries"'
-        sh 'wget https://packages.erlang-solutions.com/erlang/esl-erlang/FLAVOUR_1_general/esl-erlang_19.1~centos~7_amd64.rpm'
-        sh 'rpm -ivh esl-erlang_19.1~centos~7_amd64.rpm'
         checkout scm
         sh 'ip link add webserver type dummy'
         sh 'ip link set webserver up'
