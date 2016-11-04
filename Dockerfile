@@ -10,5 +10,6 @@ RUN yum groupinstall -y "Development Tools" "Development Libraries" && yum clean
 RUN wget http://packages.erlang-solutions.com/erlang-solutions-1.0-1.noarch.rpm
 RUN rpm -Uvh erlang-solutions-1.0-1.noarch.rpm
 RUN yum install -y esl-erlang-19.1 && yum clean all
+RUN yum install -y python-pip && yum clean all
 RUN pip install codecov
 
