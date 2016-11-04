@@ -3,7 +3,7 @@ node('mesos') {
     checkout scm
     def myImage = docker.build "erlang19.1"
     
-    myImage.inside {
+    myImage.inside("--privileged=true") {
         checkout scm
         sh 'ip addr add 1.1.1.1/32 dev lo'
         sh 'ip addr add 1.1.1.2/32 dev lo'
