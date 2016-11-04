@@ -1,9 +1,9 @@
 node('mesos') {
     stage 'build'
-    def centos7 = docker.image('centos:7.2.1511');
-    centos7.pull();
-
-    centos7.inside {
+    checkout scm
+    def myImage = docker.build "erlang19.1"
+    
+    myImage.inside {
         sh 'yum install -y wget'
         sh 'yum groupinstall -y "Development Tools" "Development Libraries"'
         sh 'wget https://packages.erlang-solutions.com/erlang/esl-erlang/FLAVOUR_1_general/esl-erlang_19.1~centos~7_amd64.rpm'
