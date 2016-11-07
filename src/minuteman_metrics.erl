@@ -102,11 +102,9 @@ check_connections(State) ->
 -spec(check_connections(#state{}, {#ip_vs_conn{}, #ip_vs_conn_status{}}) -> ok).
 check_connections(_State, {Conn, #ip_vs_conn_status{tcp_state = syn_recv}}) ->
     conn_failed(Conn);
-check_connections(State, {Conn, Status = #ip_vs_conn_status{tcp_state = time_wait}}) ->
-    conn_success(State, Conn, Status);
-check_connections(State, {Conn, Status = #ip_vs_conn_status{tcp_state = close_wait}}) ->
-    conn_success(State, Conn, Status);
-check_connections(State, {Conn, Status = #ip_vs_conn_status{tcp_state = established}}) ->
+check_connections(_State, {Conn, #ip_vs_conn_status{tcp_state = syn_sent}}) ->
+    conn_failed(Conn);
+check_connections(State, {Conn, Status}) ->
     conn_success(State, Conn, Status).
 
 -spec(conn_failed(#ip_vs_conn{}) -> ok).

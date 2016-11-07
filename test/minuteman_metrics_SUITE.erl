@@ -2,9 +2,12 @@
 -compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
+-include("minuteman.hrl").
 
-all() -> [test_init,
-          test_push_metrics,
+all() -> [%test_init,
+          %test_push_metrics,
+          %test_wait_metrics,
+          test_named_vip,
           test_gen_server].
 
 
@@ -18,9 +21,29 @@ test_gen_server(_Config) ->
     sys:resume(minuteman_metrics).
 
 test_push_metrics(_Config) ->
-    erlang:send(ip_vs_conn_monitor, poll_proc),
-    erlang:send(minuteman_metrics, push_metrics),
-    timer:sleep(1000),
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(2000),
+    R = telemetry_store:reap(),
+    ct:pal("reaped ~p", [R]),
+    ok.
+
+test_wait_metrics(_Config) ->
+    timer:sleep(2000),
+    R = telemetry_store:reap(),
+    ct:pal("reaped ~p", [R]),
+    ok.
+
+test_named_vip(_Config) ->
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update,
+                                                       {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 8080},
+                                                        riak_dt_orswot},
+                                                       {add, {{10, 0, 79, 182}, 8080}}}]}),
+    [{ip, IP}] = minuteman_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
+    ct:pal("ip is ~p", [IP]),
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(2000),
     R = telemetry_store:reap(),
     ct:pal("reaped ~p", [R]),
     ok.
@@ -28,6 +51,10 @@ test_push_metrics(_Config) ->
 proc_file(_) -> "../../../../testdata/proc_ip_vs_conn2".
 init_per_testcase(Test, Config) ->
   application:set_env(ip_vs_conn, proc_file, proc_file(Test)),
+  application:set_env(minuteman, metrics_interval_seconds, 1),
+  application:set_env(minuteman, metrics_splay_seconds, 1),
+  application:set_env(ip_vs_conn, interval_seconds, 1),
+  application:set_env(ip_vs_conn, splay_seconds, 1),
   case os:cmd("id -u") of
     "0\n" ->
       ok;
