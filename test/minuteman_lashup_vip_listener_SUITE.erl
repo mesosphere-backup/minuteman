@@ -2,20 +2,16 @@
 -compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
--include_lib("include/minuteman.hrl").
+-include("minuteman.hrl").
 
-all() -> all(os:cmd("id -u")).
 
 %% root tests
-all("0\n") ->
+all() ->
   [test_uninitalized_table,
    lookup_vip,
    lookup_failure,
    lookup_failure2,
-   lookup_failure3];
-
-%% non root tests
-all(_) -> [].
+   lookup_failure3].
 
 test_uninitalized_table(_Config) ->
   IP = {10, 0, 1, 10},
@@ -55,6 +51,7 @@ lookup_vip(_Config) ->
   ok.
 init_per_testcase(test_uninitalized_table, Config) -> Config;
 init_per_testcase(_, Config) ->
+  application:set_env(minuteman, enable_networking, false),
   {ok, _} = application:ensure_all_started(minuteman),
   Config.
 

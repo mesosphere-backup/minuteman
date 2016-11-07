@@ -3,15 +3,16 @@
 
 -include_lib("common_test/include/ct.hrl").
 
-all() -> all(os:cmd("id -u")).
+all() -> [test_restart].
 
-% tests that need root
-all("0\n") -> [test_restart];
-
-% tests that do not need root
-all(_) -> [].
 
 test_restart(_Config) ->
+  case os:cmd("id -u") of
+    "0\n" ->
+      ok;
+    _ ->
+      application:set_env(minuteman, enable_networking, false)
+  end,
   {ok, _} = application:ensure_all_started(minuteman),
   ok = application:stop(minuteman),
   {ok, _} = application:ensure_all_started(minuteman),

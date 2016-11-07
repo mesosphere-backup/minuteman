@@ -7,8 +7,11 @@ case os:type() of
 end.
 Fun =
     fun
-        ({overrides, Overrides}) when Platform =/= linux ->
-            {overrides, lists:keydelete(gen_socket, 2, Overrides)};
+        ({deps, Deps}) when Platform =/= linux ->
+            {deps, lists:keydelete(procket, 1, Deps)};
+        ({overrides, Overrides0}) when Platform =/= linux ->
+            Override = {override, procket, [{pre_hooks, []}, {post_hooks, []}]},
+            {overrides, [Override|Overrides0]};
         (Term) ->
             Term
     end.

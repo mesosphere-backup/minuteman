@@ -1,2 +1,3 @@
--define(IP_FIELD, {ip, riak_dt_lwwreg}).
--define(ID_FIELD, {id, riak_dt_lwwreg}).
+-define(NODEMETADATA_KEY, [minuteman, nodemetadata, ip]).
+
+-define(LWW_REG(Value), {Value, riak_dt_lwwreg}).
