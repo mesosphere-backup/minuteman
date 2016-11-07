@@ -96,7 +96,7 @@ splay_ms() ->
 -spec(check_connections(#state{}) -> ok).
 check_connections(State) ->
     {ok, Conns} = ip_vs_conn_monitor:get_connections(),
-    Parsed = maps:fold(fun(K,V,Z) -> [{ip_vs_conn:parse(K),V}|Z] end, [], Conns),
+    Parsed = maps:fold(fun(K, V, Z) -> [{ip_vs_conn:parse(K), V}|Z] end, [], Conns),
     lists:foreach(fun (C) -> check_connections(State, C) end, Parsed).
 
 -spec(check_connections(#state{}, {#ip_vs_conn{}, #ip_vs_conn_status{}}) -> ok).
