@@ -2,9 +2,13 @@
 -compile(export_all).
 
 -include_lib("common_test/include/ct.hrl").
+-include("minuteman.hrl").
 
 all() -> [test_init,
+          test_reorder,
           test_push_metrics,
+          test_named_vip,
+          test_wait_metrics,
           test_gen_server].
 
 
@@ -18,9 +22,44 @@ test_gen_server(_Config) ->
     sys:resume(minuteman_metrics).
 
 test_push_metrics(_Config) ->
-    erlang:send(ip_vs_conn_monitor, poll_proc),
-    erlang:send(minuteman_metrics, push_metrics),
-    timer:sleep(1000),
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(2000),
+    R = telemetry_store:reap(),
+    ct:pal("reaped ~p", [R]),
+    ok.
+
+test_wait_metrics(_Config) ->
+    application:set_env(minuteman, metrics_interval_seconds, 1),
+    application:set_env(minuteman, metrics_splay_seconds, 1),
+    application:set_env(ip_vs_conn, interval_seconds, 1),
+    application:set_env(ip_vs_conn, splay_seconds, 1),
+    timer:sleep(2000),
+    R = telemetry_store:reap(),
+    ct:pal("reaped ~p", [R]),
+    ok.
+
+test_reorder(_Config) ->
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(100),
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    timer:sleep(100),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(100),
+    R = telemetry_store:reap(),
+    ct:pal("reaped ~p", [R]),
+    ok.
+
+test_named_vip(_Config) ->
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update,
+                                                       {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 8080},
+                                                        riak_dt_orswot},
+                                                       {add, {{10, 0, 79, 182}, 8080}}}]}),
+    [{ip, IP}] = minuteman_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
+    ct:pal("change the testdata if it doesn't match ip: ~p", [IP]),
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(2000),
     R = telemetry_store:reap(),
     ct:pal("reaped ~p", [R]),
     ok.
