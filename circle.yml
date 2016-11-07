@@ -27,12 +27,9 @@ test:
     - sudo -E PATH=${PATH} make check
     - ./elvis rock
   post:
-    - git clone https://github.com/idubrov/covertool
-    - cd covertool && ../rebar3 compile
-    - cd covertool && ../rebar3 escriptize
+    - ./rebar3 covertool generate
     - sudo pip install codecov
-    - covertool/_build/default/bin/covertool -cover _build/test/cover/eunit.coverdata -appname urilib -output eunit.cobertura.xml; codecov -X gcov -f eunit.cobertura.xml;
-    - covertool/_build/default/bin/covertool -cover _build/test/cover/ct.coverdata -appname urilib -output ct.cobertura.xml; codecov -X gcov -f ct.cobertura.xml;
+    - codecov -X gcov -f _build/test/covertool/minuteman.covertool.xml
     - mkdir -p $CIRCLE_TEST_REPORTS/
     - mv TEST-*.xml $CIRCLE_TEST_REPORTS
     - cp -r _build/test/cover $CIRCLE_TEST_REPORTS
