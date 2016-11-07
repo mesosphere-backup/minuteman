@@ -117,7 +117,7 @@ conn_failed(#ip_vs_conn{from_ip = IP, from_port = Port,
     telemetry:counter(mm_connect_failures, Tags, AggTags, 1).
 
 -spec(conn_success(#state{}, #ip_vs_conn{}, #ip_vs_conn_status{}) -> ok).
-conn_success(#state{time = Prev}, 
+conn_success(#state{time = Prev},
              #ip_vs_conn{from_ip = IP, from_port = Port,
                          to_ip = VIP, to_port = VIPPort},
              #ip_vs_conn_status{time_ns = Time}) ->
@@ -128,7 +128,7 @@ conn_success(#state{time = Prev},
     telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
     telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta).
 
-time_delta(_Prev, Now, Time, true) -> Now - Time; 
+time_delta(_Prev, Now, Time, true) -> Now - Time;
 time_delta(Prev, Now, _Time, false) -> Now - Prev.
 
 -spec(named_tags(IIP :: integer(),
