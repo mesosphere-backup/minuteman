@@ -108,7 +108,7 @@ check_connections(State, {Conn, Status}) ->
     conn_success(State, Conn, Status).
 
 -spec(conn_failed(#ip_vs_conn{}) -> ok).
-conn_failed(#ip_vs_conn{from_ip = IP, from_port = Port,
+conn_failed(#ip_vs_conn{dst_ip = IP, dst_port = Port,
                         to_ip = VIP, to_port = VIPPort}) ->
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
@@ -116,7 +116,7 @@ conn_failed(#ip_vs_conn{from_ip = IP, from_port = Port,
 
 -spec(conn_success(#state{}, #ip_vs_conn{}, #ip_vs_conn_status{}) -> ok).
 conn_success(#state{time = Prev},
-             #ip_vs_conn{from_ip = IP, from_port = Port,
+             #ip_vs_conn{dst_ip = IP, dst_port = Port,
                          to_ip = VIP, to_port = VIPPort},
              #ip_vs_conn_status{time_ns = Time}) ->
     Now = erlang:monotonic_time(nano_seconds),
