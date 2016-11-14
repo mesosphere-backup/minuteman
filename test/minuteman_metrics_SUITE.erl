@@ -9,12 +9,13 @@ all() -> [test_init,
           test_push_metrics,
           test_named_vip,
           test_wait_metrics,
+          test_new_data,
           test_gen_server].
 
 
 test_init(_Config) -> ok.
 test_gen_server(_Config) ->
-    erlang:send(minuteman_metrics, hello),
+    hello = erlang:send(minuteman_metrics, hello),
     ok = gen_server:call(minuteman_metrics, hello),
     ok = gen_server:cast(minuteman_metrics, hello),
     sys:suspend(minuteman_metrics),
@@ -30,13 +31,23 @@ test_push_metrics(_Config) ->
     ok.
 
 test_wait_metrics(_Config) ->
-    application:set_env(minuteman, metrics_interval_seconds, 1),
-    application:set_env(minuteman, metrics_splay_seconds, 1),
-    application:set_env(ip_vs_conn, interval_seconds, 1),
-    application:set_env(ip_vs_conn, splay_seconds, 1),
     timer:sleep(2000),
     R = telemetry_store:reap(),
     ct:pal("reaped ~p", [R]),
+    ok.
+
+test_new_data(_Config) ->
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    R = telemetry_store:reap(),
+    ct:pal("reaped1 ~p", [R]),
+    ProcFile = "../../../../testdata/proc_ip_vs_conn3",
+    application:set_env(ip_vs_conn, proc_file, ProcFile),
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    timer:sleep(1000),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    R2 = telemetry_store:reap(),
+    ct:pal("reaped2 ~p", [R2]),
     ok.
 
 test_reorder(_Config) ->
@@ -65,6 +76,13 @@ test_named_vip(_Config) ->
     ok.
 
 proc_file(_) -> "../../../../testdata/proc_ip_vs_conn2".
+set_interval(test_wait_metrics) ->
+    application:set_env(minuteman, metrics_interval_seconds, 1),
+    application:set_env(minuteman, metrics_splay_seconds, 1),
+    application:set_env(ip_vs_conn, interval_seconds, 1),
+    application:set_env(ip_vs_conn, splay_seconds, 1);
+set_interval(_) -> ok.
+
 init_per_testcase(Test, Config) ->
   application:set_env(ip_vs_conn, proc_file, proc_file(Test)),
   case os:cmd("id -u") of
@@ -73,6 +91,7 @@ init_per_testcase(Test, Config) ->
     _ ->
       application:set_env(minuteman, enable_networking, false)
   end,
+  set_interval(Test),
   {ok, _} = application:ensure_all_started(minuteman),
   Config.
 

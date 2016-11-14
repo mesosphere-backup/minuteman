@@ -24,7 +24,7 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
-          time = 0 :: integer()
+          conns = maps:new() :: conn_map()
     }).
 
 -spec(start_link() ->
@@ -64,10 +64,9 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(push_metrics, State = #state{}) ->
-    check_connections(State),
+    NewConns = check_connections(State#state.conns),
     erlang:send_after(splay_ms(), self(), push_metrics),
-    Now = erlang:monotonic_time(nano_seconds),
-    {noreply, State#state{time = Now}};
+    {noreply, State#state{conns = NewConns}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -93,28 +92,33 @@ splay_ms() ->
     NextMinute + Splay.
 
 %% implementation
--spec(check_connections(#state{}) -> ok).
-check_connections(State) ->
+-spec(check_connections(conn_map()) -> conn_map()).
+check_connections(OldConns) ->
     {ok, Conns} = ip_vs_conn_monitor:get_connections(),
     Splay = minuteman_config:metrics_splay_seconds(),
     Interval = minuteman_config:metrics_interval_seconds(),
     PollDelay = 2*(Splay + Interval), %% assuming these delays are the same in ip_vs_conn
-    Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(Conns)),
-    lists:foreach(fun (C) -> check_connections(State, C, PollDelay) end, Parsed).
+    AllConns = maps:to_list(Conns),
+    OnlyNewConns = lists:filter(fun(Conn) -> has_new_state(OldConns, Conn) end, AllConns),
+    Parsed = lists:map(fun ip_vs_conn:parse/1, OnlyNewConns),
+    lists:foreach(fun (C) -> check_connections(C, PollDelay) end, Parsed),
+    Conns.
 
--spec(check_connections(#state{}, #ip_vs_conn{}, integer()) -> ok).
-check_connections(_State,
-                  Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_recv},
+has_new_state(_OldConns, {_K,#ip_vs_conn_status{tcp_state = syn_recv}}) -> true;
+has_new_state(_OldConns, {_K,#ip_vs_conn_status{tcp_state = syn_sent}}) -> true;
+has_new_state(OldConns, {K,_V}) -> not(maps:is_key(K,OldConns)).
+
+-spec(check_connections(#ip_vs_conn{}, integer()) -> ok).
+check_connections(Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_recv},
                   PollDelay) when Expires < PollDelay ->
     conn_failed(Conn);
-check_connections(_State,
-                  Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_sent},
+check_connections(Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_sent},
                   PollDelay) when Expires < PollDelay ->
     conn_failed(Conn);
-check_connections(_State, #ip_vs_conn{tcp_state = syn_recv}, _PollDelay) -> ok;
-check_connections(_State, #ip_vs_conn{tcp_state = syn_sent}, _PollDelay) -> ok;
-check_connections(State, Conn, _PollDelay) ->
-    conn_success(State, Conn).
+check_connections(#ip_vs_conn{tcp_state = syn_recv}, _PollDelay) -> ok;
+check_connections(#ip_vs_conn{tcp_state = syn_sent}, _PollDelay) -> ok;
+check_connections(Conn, _PollDelay) ->
+    conn_success(Conn).
 
 -spec(conn_failed(#ip_vs_conn{}) -> ok).
 conn_failed(#ip_vs_conn{dst_ip = IP, dst_port = Port,
@@ -123,9 +127,8 @@ conn_failed(#ip_vs_conn{dst_ip = IP, dst_port = Port,
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_failures, Tags, AggTags, 1).
 
--spec(conn_success(#state{}, #ip_vs_conn{}) -> ok).
-conn_success(_State,
-             #ip_vs_conn{dst_ip = IP, dst_port = Port,
+-spec(conn_success(#ip_vs_conn{}) -> ok).
+conn_success(#ip_vs_conn{dst_ip = IP, dst_port = Port,
                          to_ip = VIP, to_port = VIPPort}) ->
     EstablishTime = 1,
     Tags = named_tags(IP, Port, VIP, VIPPort),
