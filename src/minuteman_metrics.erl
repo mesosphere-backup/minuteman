@@ -96,16 +96,25 @@ splay_ms() ->
 -spec(check_connections(#state{}) -> ok).
 check_connections(State) ->
     {ok, Conns} = ip_vs_conn_monitor:get_connections(),
-    Parsed = maps:fold(fun(K, V, Z) -> [{ip_vs_conn:parse(K), V}|Z] end, [], Conns),
-    lists:foreach(fun (C) -> check_connections(State, C) end, Parsed).
+    Splay = minuteman_config:metrics_splay_seconds(),
+    Interval = minuteman_config:metrics_interval_seconds(),
+    PollDelay = 2*(Splay + Interval), %% assuming these delays are the same in ip_vs_conn
+    Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(Conns)),
+    lists:foreach(fun (C) -> check_connections(State, C, PollDelay) end, Parsed).
 
--spec(check_connections(#state{}, {#ip_vs_conn{}, #ip_vs_conn_status{}}) -> ok).
-check_connections(_State, {Conn, #ip_vs_conn_status{tcp_state = syn_recv}}) ->
+-spec(check_connections(#state{}, #ip_vs_conn{}, integer()) -> ok).
+check_connections(_State,
+                  Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_recv},
+                  PollDelay) when Expires < PollDelay ->
     conn_failed(Conn);
-check_connections(_State, {Conn, #ip_vs_conn_status{tcp_state = syn_sent}}) ->
+check_connections(_State,
+                  Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_sent},
+                  PollDelay) when Expires < PollDelay ->
     conn_failed(Conn);
-check_connections(State, {Conn, Status}) ->
-    conn_success(State, Conn, Status).
+check_connections(_State, #ip_vs_conn{tcp_state = syn_recv}, _PollDelay) -> ok;
+check_connections(_State, #ip_vs_conn{tcp_state = syn_sent}, _PollDelay) -> ok;
+check_connections(State, Conn, _PollDelay) ->
+    conn_success(State, Conn).
 
 -spec(conn_failed(#ip_vs_conn{}) -> ok).
 conn_failed(#ip_vs_conn{dst_ip = IP, dst_port = Port,
@@ -114,20 +123,15 @@ conn_failed(#ip_vs_conn{dst_ip = IP, dst_port = Port,
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_failures, Tags, AggTags, 1).
 
--spec(conn_success(#state{}, #ip_vs_conn{}, #ip_vs_conn_status{}) -> ok).
-conn_success(#state{time = Prev},
+-spec(conn_success(#state{}, #ip_vs_conn{}) -> ok).
+conn_success(_State,
              #ip_vs_conn{dst_ip = IP, dst_port = Port,
-                         to_ip = VIP, to_port = VIPPort},
-             #ip_vs_conn_status{time_ns = Time}) ->
-    Now = erlang:monotonic_time(nano_seconds),
-    TimeDelta = time_delta(Prev, Now, Time, Time > Prev),
+                         to_ip = VIP, to_port = VIPPort}) ->
+    EstablishTime = 1,
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_successes, Tags, AggTags, 1),
-    telemetry:histogram(mm_connect_latency, Tags, AggTags, TimeDelta).
-
-time_delta(_Prev, Now, Time, true) -> Now - Time;
-time_delta(Prev, Now, _Time, false) -> Now - Prev.
+    telemetry:histogram(mm_connect_latency, Tags, AggTags, EstablishTime).
 
 -spec(named_tags(IIP :: integer(),
                  Port :: inet:port_numbrer(),
