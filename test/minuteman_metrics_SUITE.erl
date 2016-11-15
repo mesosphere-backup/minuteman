@@ -4,12 +4,13 @@
 -include_lib("common_test/include/ct.hrl").
 -include("minuteman.hrl").
 
-all() -> [test_init,
-          test_reorder,
-          test_push_metrics,
-          test_named_vip,
-          test_wait_metrics,
-          test_new_data,
+all() -> [%test_init,
+          %test_reorder,
+          %test_push_metrics,
+          %test_named_vip,
+          %test_wait_metrics,
+          %test_new_data,
+          test_one_conn,
           test_gen_server].
 
 
@@ -61,6 +62,15 @@ test_reorder(_Config) ->
     ct:pal("reaped ~p", [R]),
     ok.
 
+test_one_conn(_Config) ->
+    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
+    timer:sleep(100),
+    push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(100),
+    R = telemetry_store:reap(),
+    ct:pal("reaped ~p", [R]),
+    ok.
+
 test_named_vip(_Config) ->
     {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update,
                                                        {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 8080},
@@ -75,6 +85,7 @@ test_named_vip(_Config) ->
     ct:pal("reaped ~p", [R]),
     ok.
 
+proc_file(test_one_conn) -> "../../../../testdata/proc_ip_vs_conn1";
 proc_file(_) -> "../../../../testdata/proc_ip_vs_conn2".
 set_interval(test_wait_metrics) ->
     application:set_env(minuteman, metrics_interval_seconds, 1),

@@ -16,7 +16,8 @@
                   dns,
                   mesos_state,
                   procket,
-                  ip_vs_conn
+                  ip_vs_conn,
+                  tcp_metrics
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}
