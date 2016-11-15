@@ -104,9 +104,9 @@ check_connections(OldConns) ->
     lists:foreach(fun (C) -> check_connections(C, PollDelay) end, Parsed),
     Conns.
 
-has_new_state(_OldConns, {_K,#ip_vs_conn_status{tcp_state = syn_recv}}) -> true;
-has_new_state(_OldConns, {_K,#ip_vs_conn_status{tcp_state = syn_sent}}) -> true;
-has_new_state(OldConns, {K,_V}) -> not(maps:is_key(K,OldConns)).
+has_new_state(_OldConns, {_K, #ip_vs_conn_status{tcp_state = syn_recv}}) -> true;
+has_new_state(_OldConns, {_K, #ip_vs_conn_status{tcp_state = syn_sent}}) -> true;
+has_new_state(OldConns, {K, _V}) -> not(maps:is_key(K, OldConns)).
 
 -spec(check_connections(#ip_vs_conn{}, integer()) -> ok).
 check_connections(Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_recv},
