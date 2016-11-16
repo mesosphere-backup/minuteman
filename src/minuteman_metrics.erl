@@ -96,7 +96,7 @@ splay_ms() ->
 
 %% implementation
 -spec(check_connections(conn_map(), backend_conns()) -> {conn_map(), backend_conns()}).
-check_connections(OldConns, OldParsedMap) ->
+check_connections(OldConns, OldDstIpMap) ->
     {ok, Conns} = ip_vs_conn_monitor:get_connections(),
     Splay = minuteman_config:metrics_splay_seconds(),
     Interval = minuteman_config:metrics_interval_seconds(),
@@ -104,17 +104,20 @@ check_connections(OldConns, OldParsedMap) ->
     OnlyNewConns = new_connections(OldConns, Conns),
     Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(OnlyNewConns)),
     lists:foreach(fun (C) -> apply_connection(C, PollDelay) end, Parsed),
-    ParsedMap = lists:foldl(fun vip_addr_map/2, #{}, Parsed),
+    DstIpMap = dst_ip_map(Parsed),
     {ok, Metrics} = tcp_metrics_monitor:get_metrics(),
-    process_p99s(Metrics, OldParsedMap, ParsedMap),
-    {Conns, ParsedMap}.
+    process_p99s(Metrics, OldDstIpMap, DstIpMap),
+    {Conns, DstIpMap}.
 
-process_p99s(Metrics, OldParsedMap, ParsedMap) ->
+process_p99s(Metrics, OldDstIpMap, ParsedMap) ->
     P99s = get_p99s(ParsedMap, Metrics),
     New = lists:flatmap(fun apply_p99/1, P99s),
-    OldP99s = get_p99s(OldParsedMap, Metrics),
+    OldP99s = get_p99s(OldDstIpMap, Metrics),
     Old = lists:flatmap(fun apply_p99/1, OldP99s),
     Old ++ New.
+
+dst_ip_map(Parsed) ->
+    lists:foldl(fun vip_addr_map/2, #{}, Parsed).
 
 vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z) ->
     vip_addr_map(C, Z, maps:get(int_to_ip(IP), Z, undefined)).
@@ -340,5 +343,18 @@ process_p99s_4_test_() ->
     [?_assertEqual(DAddr, int_to_ip(IP)),
      ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
     ].
+
+process_dst_ip_map_test_() ->
+    DAddr = {54, 192, 147, 29},
+    IP = 16#36c0931d,
+    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, 167792566, 8080, IP, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, 167792566, 8080, IP, 8081, 59},
+    ConnMap = #{DAddr => [Conn]},
+    ConnMap2 = #{DAddr => [Conn2, Conn]},
+    [?_assertEqual(DAddr, int_to_ip(IP)),
+     ?_assertEqual(ConnMap, dst_ip_map([Conn])),
+     ?_assertEqual(ConnMap2, dst_ip_map([Conn, Conn2]))
+    ].
+
 
 -endif.
