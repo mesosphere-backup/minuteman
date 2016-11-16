@@ -4,12 +4,12 @@
 -include_lib("common_test/include/ct.hrl").
 -include("minuteman.hrl").
 
-all() -> [%test_init,
-          %test_reorder,
-          %test_push_metrics,
-          %test_named_vip,
-          %test_wait_metrics,
-          %test_new_data,
+all() -> [test_init,
+          test_reorder,
+          test_push_metrics,
+          test_named_vip,
+          test_wait_metrics,
+          test_new_data,
           test_one_conn,
           test_gen_server].
 

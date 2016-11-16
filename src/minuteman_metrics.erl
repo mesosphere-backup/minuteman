@@ -148,8 +148,9 @@ is_opened({_K, #ip_vs_conn_status{tcp_state = syn_recv}}) -> false;
 is_opened({_K, #ip_vs_conn_status{tcp_state = syn_sent}}) -> false;
 is_opened(_KV) -> true.
 
+-spec(opened_or_dead(integer(), conn_map()) -> conn_map()).
 opened_or_dead(PD, Conns) ->
-    maps:filter(fun(KV) -> is_opened(KV) or is_dead(PD, Conns) end, Conns).
+    maps:filter(fun(K, V) -> is_opened({K,V}) or is_dead(PD, {K,V}) end, Conns).
 
 -spec(record_connection(#ip_vs_conn{})-> ok).
 record_connection(Conn = #ip_vs_conn{tcp_state = syn_recv}) ->
@@ -376,5 +377,10 @@ process_dst_ip_map_test_() ->
      ?_assertEqual(ConnMap2, dst_ip_map([Conn, Conn2]))
     ].
 
+record_failed_test_() ->
+    Conn1 = {ip_vs_conn, tcp, syn_sent, 167792566, 47808, 167792566, 8080, 167792566, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, syn_recv, 167792567, 47808, 167792566, 8080, 167792566, 8081, 59},
+    [?_assertEqual(ok, record_connection(Conn1)),
+     ?_assertEqual(ok, record_connection(Conn2))].
 
 -endif.
