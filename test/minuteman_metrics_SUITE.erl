@@ -24,7 +24,6 @@ test_gen_server(_Config) ->
     sys:resume(minuteman_metrics).
 
 test_push_metrics(_Config) ->
-    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
     timer:sleep(2000),
     R = telemetry_store:reap(),
@@ -38,35 +37,28 @@ test_wait_metrics(_Config) ->
     ok.
 
 test_new_data(_Config) ->
-    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(1000),
     R = telemetry_store:reap(),
     ct:pal("reaped1 ~p", [R]),
     ProcFile = "../../../../testdata/proc_ip_vs_conn3",
     application:set_env(ip_vs_conn, proc_file, ProcFile),
-    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
-    timer:sleep(1000),
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
+    timer:sleep(1000),
     R2 = telemetry_store:reap(),
     ct:pal("reaped2 ~p", [R2]),
     ok.
 
 test_reorder(_Config) ->
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
-    timer:sleep(100),
-    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
-    timer:sleep(100),
-    push_metrics = erlang:send(minuteman_metrics, push_metrics),
-    timer:sleep(100),
+    timer:sleep(1000),
     R = telemetry_store:reap(),
     ct:pal("reaped ~p", [R]),
     ok.
 
 test_one_conn(_Config) ->
-    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
-    timer:sleep(100),
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
-    timer:sleep(100),
+    timer:sleep(1000),
     R = telemetry_store:reap(),
     ct:pal("reaped ~p", [R]),
     ok.
@@ -78,7 +70,6 @@ test_named_vip(_Config) ->
                                                        {add, {{10, 0, 79, 182}, 8080}}}]}),
     [{ip, IP}] = minuteman_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
     ct:pal("change the testdata if it doesn't match ip: ~p", [IP]),
-    poll_proc = erlang:send(ip_vs_conn_monitor, poll_proc),
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
     timer:sleep(2000),
     R = telemetry_store:reap(),
@@ -87,11 +78,10 @@ test_named_vip(_Config) ->
 
 proc_file(test_one_conn) -> "../../../../testdata/proc_ip_vs_conn1";
 proc_file(_) -> "../../../../testdata/proc_ip_vs_conn2".
+
 set_interval(test_wait_metrics) ->
     application:set_env(minuteman, metrics_interval_seconds, 1),
-    application:set_env(minuteman, metrics_splay_seconds, 1),
-    application:set_env(ip_vs_conn, interval_seconds, 1),
-    application:set_env(ip_vs_conn, splay_seconds, 1);
+    application:set_env(minuteman, metrics_splay_seconds, 1);
 set_interval(_) -> ok.
 
 init_per_testcase(Test, Config) ->

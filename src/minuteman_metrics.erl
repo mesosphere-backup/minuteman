@@ -24,6 +24,7 @@
 -define(SERVER, ?MODULE).
 
 -type backend_conns() :: #{inet:ip4_address() => [#ip_vs_conn{}]}.
+-type metrics() :: []. %% netlink record
 
 -record(state, {
           conns = maps:new() :: conn_map(),
@@ -67,9 +68,16 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(push_metrics, State = #state{}) ->
-    {NewConns, NewBCs} = check_connections(State#state.conns, State#state.backend_conns),
+    ok = ip_vs_conn_monitor:get_connections(update_connections),
+    ok = tcp_metrics_monitor:get_metrics(update_metrics),
     erlang:send_after(splay_ms(), self(), push_metrics),
-    {noreply, State#state{conns = NewConns, backend_conns = NewBCs}};
+    {noreply, State};
+handle_info({update_metrics, Metrics}, State = #state{}) ->
+    update_metrics(State#state.backend_conns, Metrics),
+    {noreply, State};
+handle_info({update_connections, Conns}, State = #state{}) ->
+    {NewConns, NewBackends} = update_connections(State#state.conns, Conns),
+    {noreply, State#state{conns = NewConns, backend_conns = NewBackends}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -95,27 +103,22 @@ splay_ms() ->
     NextMinute + Splay.
 
 %% implementation
--spec(check_connections(conn_map(), backend_conns()) -> {conn_map(), backend_conns()}).
-check_connections(OldConns, OldDstIpMap) ->
-    {ok, Conns} = ip_vs_conn_monitor:get_connections(),
+-spec(update_connections(conn_map(), conn_map()) -> {conn_map(), backend_conns()}).
+update_connections(OldConns, Conns) ->
     Splay = minuteman_config:metrics_splay_seconds(),
     Interval = minuteman_config:metrics_interval_seconds(),
-    PollDelay = 2*(Splay + Interval), %% assuming these delays are the same in ip_vs_conn
+    PollDelay = (Splay + Interval),
     OnlyNewConns = new_connections(PollDelay, OldConns, Conns),
     Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(OnlyNewConns)),
     lists:foreach(fun (C) -> record_connection(C) end, Parsed),
-    DstIpMap = dst_ip_map(Parsed),
-    {ok, Metrics} = tcp_metrics_monitor:get_metrics(),
-    process_p99s(Metrics, OldDstIpMap, DstIpMap),
+    NewBackends = dst_ip_map(Parsed),
     OpenedOrDead = opened_or_dead(PollDelay, Conns),
-    {OpenedOrDead, DstIpMap}.
-
-process_p99s(Metrics, OldDstIpMap, ParsedMap) ->
-    P99s = get_p99s(ParsedMap, Metrics),
-    New = lists:flatmap(fun apply_p99/1, P99s),
-    OldP99s = get_p99s(OldDstIpMap, Metrics),
-    Old = lists:flatmap(fun apply_p99/1, OldP99s),
-    Old ++ New.
+    {OpenedOrDead, NewBackends}.
+    
+-spec(update_metrics(conn_map(), metrics()) -> [{#ip_vs_conn{}, integer(), integer()}]).
+update_metrics(Backends, Metrics) ->
+    P99s = get_p99s(Backends, Metrics),
+    lists:flatmap(fun apply_p99/1, P99s).
 
 dst_ip_map(Parsed) ->
     lists:foldl(fun vip_addr_map/2, #{}, Parsed).
@@ -286,12 +289,9 @@ process_p99s_test_() ->
     ConnMap = #{DAddr => [Conn]},
     ConnMap2 = #{DAddr => [Conn, Conn2]},
     [?_assertEqual(DAddr, int_to_ip(IP)),
-     ?_assertEqual([{Conn, 47313, 23656}], process_p99s(Metrics, ConnMap, #{})),
-     ?_assertEqual([{Conn, 47313, 23656}], process_p99s(Metrics, #{}, ConnMap)),
-     ?_assertEqual([{Conn, 47313, 23656}, {Conn2, 47313, 23656}], process_p99s(Metrics, ConnMap2, #{})),
-     ?_assertEqual([{Conn, 47313, 23656}, {Conn2, 47313, 23656}], process_p99s(Metrics, #{}, ConnMap2)),
-     ?_assertEqual([{Conn, 47313, 23656}, {Conn, 47313, 23656}, {Conn2, 47313, 23656}], process_p99s(Metrics, ConnMap, ConnMap2)),
-     ?_assertEqual([], process_p99s(Metrics, #{}, #{}))
+     ?_assertEqual([{Conn, 47313, 23656}], update_metrics(ConnMap, Metrics)),
+     ?_assertEqual([{Conn, 47313, 23656}, {Conn2, 47313, 23656}], update_metrics(ConnMap2, Metrics)),
+     ?_assertEqual([], update_metrics(#{}, Metrics))
     ].
 
 process_p99s_1_test_() ->
@@ -310,7 +310,8 @@ process_p99s_1_test_() ->
     ConnMap = #{DAddr => [Conn]},
     ConnMap2 = #{DAddr => [Conn, Conn2]},
     [?_assertEqual(DAddr, int_to_ip(IP)),
-     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+     ?_assertEqual([], update_metrics(ConnMap, Metrics)),
+     ?_assertEqual([], update_metrics(ConnMap2, Metrics))
     ].
 
 process_p99s_2_test_() ->
@@ -329,7 +330,8 @@ process_p99s_2_test_() ->
     ConnMap = #{DAddr => [Conn]},
     ConnMap2 = #{DAddr => [Conn, Conn2]},
     [?_assertEqual(DAddr, int_to_ip(IP)),
-     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+     ?_assertEqual([], update_metrics(ConnMap, Metrics)),
+     ?_assertEqual([], update_metrics(ConnMap2, Metrics))
     ].
 
 process_p99s_3_test_() ->
@@ -347,7 +349,8 @@ process_p99s_3_test_() ->
     ConnMap = #{DAddr => [Conn]},
     ConnMap2 = #{DAddr => [Conn, Conn2]},
     [?_assertEqual(DAddr, int_to_ip(IP)),
-     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+     ?_assertEqual([], update_metrics(ConnMap, Metrics)),
+     ?_assertEqual([], update_metrics(ConnMap2, Metrics))
     ].
 
 process_p99s_4_test_() ->
@@ -362,7 +365,8 @@ process_p99s_4_test_() ->
     ConnMap = #{DAddr => [Conn]},
     ConnMap2 = #{DAddr => [Conn, Conn2]},
     [?_assertEqual(DAddr, int_to_ip(IP)),
-     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+     ?_assertEqual([], update_metrics(ConnMap, Metrics)),
+     ?_assertEqual([], update_metrics(ConnMap2, Metrics))
     ].
 
 process_dst_ip_map_test_() ->
