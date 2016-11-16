@@ -102,7 +102,7 @@ check_connections(OldConns) ->
     Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(OnlyNewConns)),
     lists:foreach(fun (C) -> check_connections(C, PollDelay) end, Parsed),
     ParsedMap = lists:foldl(fun vip_addr_map/2, #{}, Parsed),
-    {ok, Metrics} = tcp_metrics_monitor:get_metrics(),
+    Metrics = tcp_metrics_monitor:get_metrics(),
     P99s = get_p99s(ParsedMap, Metrics),
     lists:foreach(fun apply_p99/1, P99s),
     Conns.
