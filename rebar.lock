@@ -92,7 +92,7 @@
   1},
  {<<"tcp_metrics">>,
   {git,"https://github.com/mesosphere/tcp_metrics",
-       {ref,"15dd8823abd60f52b26c5467a7f21aaa62537459"}},
+       {ref,"743efaa08ae180763bf895b6a9c0ca22333d56de"}},
   0},
  {<<"telemetry">>,
   {git,"git://github.com/dcos/telemetry-net.git",

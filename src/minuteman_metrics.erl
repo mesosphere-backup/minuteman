@@ -105,12 +105,16 @@ check_connections(OldConns, OldParsedMap) ->
     Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(OnlyNewConns)),
     lists:foreach(fun (C) -> apply_connection(C, PollDelay) end, Parsed),
     ParsedMap = lists:foldl(fun vip_addr_map/2, #{}, Parsed),
-    Metrics = tcp_metrics_monitor:get_metrics(),
-    P99s = get_p99s(ParsedMap, Metrics),
-    lists:foreach(fun apply_p99/1, P99s),
-    OldP99s = get_p99s(OldParsedMap, Metrics),
-    lists:foreach(fun apply_p99/1, OldP99s),
+    {ok, Metrics} = tcp_metrics_monitor:get_metrics(),
+    process_p99s(Metrics, OldParsedMap, ParsedMap),
     {Conns, ParsedMap}.
+
+process_p99s(Metrics, OldParsedMap, ParsedMap) ->
+    P99s = get_p99s(ParsedMap, Metrics),
+    New = lists:flatmap(fun apply_p99/1, P99s),
+    OldP99s = get_p99s(OldParsedMap, Metrics),
+    Old = lists:flatmap(fun apply_p99/1, OldP99s),
+    Old ++ New.
 
 vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z) ->
     vip_addr_map(C, Z, maps:get(int_to_ip(IP), Z, undefined)).
@@ -170,15 +174,16 @@ match_conn(_, _, undefined) -> [];
 match_conn(Conns, RttUs, RttVarUs) -> [{Conns, RttUs, RttVarUs}].
 
 apply_p99({Conns, RttUs, RttVarUs}) ->
-    lists:foreach(fun(C) -> apply_p99(C, RttUs, RttVarUs) end, Conns).
+    lists:flatmap(fun(C) -> apply_p99(C, RttUs, RttVarUs) end, Conns).
 
-apply_p99(#ip_vs_conn{dst_ip = IP, dst_port = Port,
-                      to_ip = VIP, to_port = VIPPort},
+apply_p99(C = #ip_vs_conn{dst_ip = IP, dst_port = Port,
+                          to_ip = VIP, to_port = VIPPort},
           RttUs, RttVarUs) ->
     P99 = erlang:round(1000*(RttUs + math:sqrt(RttVarUs)*3)),
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
-    telemetry:histogram(mm_connect_latency, Tags, AggTags, P99).
+    telemetry:histogram(mm_connect_latency, Tags, AggTags, P99),
+    [{C, RttUs, RttVarUs}].
 
 
 -spec(named_tags(IIP :: integer(),
@@ -239,5 +244,101 @@ get_p99s_test_() ->
     [?_assertEqual(DAddr, int_to_ip(IP)),
      ?_assertEqual([{[Conn], 47313, 23656}], get_p99s(ConnMap, Metrics)),
      ?_assertEqual([{[Conn, Conn2], 47313, 23656}], get_p99s(ConnMap2, Metrics))].
+
+process_p99s_test_() ->
+    DAddr = {54, 192, 147, 29},
+    Attrs = [{d_addr, DAddr},
+             {s_addr, {10, 0, 79, 182}},
+             {age_ms, 806101408},
+             {vals, [{rtt_us, 47313},
+                    {rtt_ms, 47},
+                    {rtt_var_us, 23656},
+                    {rtt_var_ms, 23},
+                    {cwnd, 10}]}],
+    Metrics = [{netlink, tcp_metrics, [multi], 18, 31595, {get, 1, 0, Attrs}}],
+    IP = 16#36c0931d,
+    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, 167792566, 8080, IP, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, 167792566, 8080, IP, 8081, 59},
+    ConnMap = #{DAddr => [Conn]},
+    ConnMap2 = #{DAddr => [Conn, Conn2]},
+    [?_assertEqual(DAddr, int_to_ip(IP)),
+     ?_assertEqual([{Conn, 47313, 23656}], process_p99s(Metrics, ConnMap, #{})),
+     ?_assertEqual([{Conn, 47313, 23656}], process_p99s(Metrics, #{}, ConnMap)),
+     ?_assertEqual([{Conn, 47313, 23656}, {Conn2, 47313, 23656}], process_p99s(Metrics, ConnMap2, #{})),
+     ?_assertEqual([{Conn, 47313, 23656}, {Conn2, 47313, 23656}], process_p99s(Metrics, #{}, ConnMap2)),
+     ?_assertEqual([{Conn, 47313, 23656}, {Conn, 47313, 23656}, {Conn2, 47313, 23656}], process_p99s(Metrics, ConnMap, ConnMap2)),
+     ?_assertEqual([], process_p99s(Metrics, #{}, #{}))
+    ].
+
+process_p99s_1_test_() ->
+    DAddr = {54, 192, 147, 29},
+    Attrs = [{d_addr, DAddr},
+             {s_addr, {10, 0, 79, 182}},
+             {age_ms, 806101408},
+             {vals, [{rtt_us, 47313},
+                    {rtt_ms, 47},
+                    {rtt_var_ms, 23},
+                    {cwnd, 10}]}],
+    Metrics = [{netlink, tcp_metrics, [multi], 18, 31595, {get, 1, 0, Attrs}}],
+    IP = 16#36c0931d,
+    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, 167792566, 8080, IP, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, 167792566, 8080, IP, 8081, 59},
+    ConnMap = #{DAddr => [Conn]},
+    ConnMap2 = #{DAddr => [Conn, Conn2]},
+    [?_assertEqual(DAddr, int_to_ip(IP)),
+     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+    ].
+
+process_p99s_2_test_() ->
+    DAddr = {54, 192, 147, 29},
+    Attrs = [{d_addr, DAddr},
+             {s_addr, {10, 0, 79, 182}},
+             {age_ms, 806101408},
+             {vals, [{rtt_var_us, 23656},
+                    {rtt_ms, 47},
+                    {rtt_var_ms, 23},
+                    {cwnd, 10}]}],
+    Metrics = [{netlink, tcp_metrics, [multi], 18, 31595, {get, 1, 0, Attrs}}],
+    IP = 16#36c0931d,
+    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, 167792566, 8080, IP, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, 167792566, 8080, IP, 8081, 59},
+    ConnMap = #{DAddr => [Conn]},
+    ConnMap2 = #{DAddr => [Conn, Conn2]},
+    [?_assertEqual(DAddr, int_to_ip(IP)),
+     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+    ].
+
+process_p99s_3_test_() ->
+    DAddr = {54, 192, 147, 29},
+    Attrs = [{s_addr, {10, 0, 79, 182}},
+             {age_ms, 806101408},
+             {vals, [{rtt_var_us, 23656},
+                    {rtt_ms, 47},
+                    {rtt_var_ms, 23},
+                    {cwnd, 10}]}],
+    Metrics = [{netlink, tcp_metrics, [multi], 18, 31595, {get, 1, 0, Attrs}}],
+    IP = 16#36c0931d,
+    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, 167792566, 8080, IP, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, 167792566, 8080, IP, 8081, 59},
+    ConnMap = #{DAddr => [Conn]},
+    ConnMap2 = #{DAddr => [Conn, Conn2]},
+    [?_assertEqual(DAddr, int_to_ip(IP)),
+     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+    ].
+
+process_p99s_4_test_() ->
+    DAddr = {54, 192, 147, 29},
+    Attrs = [{d_addr, DAddr},
+             {s_addr, {10, 0, 79, 182}},
+             {age_ms, 806101408}],
+    Metrics = [{netlink, tcp_metrics, [multi], 18, 31595, {get, 1, 0, Attrs}}],
+    IP = 16#36c0931d,
+    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, 167792566, 8080, IP, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, 167792566, 8080, IP, 8081, 59},
+    ConnMap = #{DAddr => [Conn]},
+    ConnMap2 = #{DAddr => [Conn, Conn2]},
+    [?_assertEqual(DAddr, int_to_ip(IP)),
+     ?_assertEqual([], process_p99s(Metrics, ConnMap, ConnMap2))
+    ].
 
 -endif.
