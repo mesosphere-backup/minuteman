@@ -101,13 +101,14 @@ check_connections(OldConns, OldDstIpMap) ->
     Splay = minuteman_config:metrics_splay_seconds(),
     Interval = minuteman_config:metrics_interval_seconds(),
     PollDelay = 2*(Splay + Interval), %% assuming these delays are the same in ip_vs_conn
-    OnlyNewConns = new_connections(OldConns, Conns),
+    OnlyNewConns = new_connections(PollDelay, OldConns, Conns),
     Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(OnlyNewConns)),
-    lists:foreach(fun (C) -> apply_connection(C, PollDelay) end, Parsed),
+    lists:foreach(fun (C) -> record_connection(C) end, Parsed),
     DstIpMap = dst_ip_map(Parsed),
     {ok, Metrics} = tcp_metrics_monitor:get_metrics(),
     process_p99s(Metrics, OldDstIpMap, DstIpMap),
-    {Conns, DstIpMap}.
+    OpenedOrDead = opened_or_dead(PollDelay, Conns),
+    {OpenedOrDead, DstIpMap}.
 
 process_p99s(Metrics, OldDstIpMap, ParsedMap) ->
     P99s = get_p99s(ParsedMap, Metrics),
@@ -127,23 +128,35 @@ vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z, undefined) ->
 vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z, Ls) ->
     maps:put(int_to_ip(IP), [C | Ls], Z).
 
-new_connections(OldConns, AllConns) ->
-    maps:filter(fun(K, V) -> has_new_state(OldConns, {K, V}) end, AllConns).
+new_connections(PD, Conns, AllConns) ->
+    maps:filter(fun(K, V) -> new_connection(PD, Conns, {K, V}) end, AllConns).
 
-has_new_state(_OldConns, {_K, #ip_vs_conn_status{tcp_state = syn_recv}}) -> true;
-has_new_state(_OldConns, {_K, #ip_vs_conn_status{tcp_state = syn_sent}}) -> true;
-has_new_state(OldConns, {K, _V}) -> not(maps:is_key(K, OldConns)).
+%% only process new connections, or half opened connections that are about to expire
+new_connection(PD, Conns, {K, V}) -> not(maps:is_key(K, Conns)) and (is_opened({K, V}) or is_dead(PD, {K, V})).
 
--spec(apply_connection(#ip_vs_conn{}, integer()) -> ok).
-apply_connection(Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_recv},
-                  PollDelay) when Expires < PollDelay ->
+%% only dead if its half opened and about to expire
+is_dead(PD, {K, V=#ip_vs_conn_status{tcp_state = syn_recv}}) -> 
+    Conn = ip_vs_conn:parse({K,V}),
+    PD > Conn#ip_vs_conn.expires;
+is_dead(PD, {K, V=#ip_vs_conn_status{tcp_state = syn_sent}}) ->
+    Conn = ip_vs_conn:parse({K,V}),
+    PD > Conn#ip_vs_conn.expires;
+is_dead(_PD, _KV) -> false.
+
+%% only opened if its not half opened
+is_opened({_K, #ip_vs_conn_status{tcp_state = syn_recv}}) -> false;
+is_opened({_K, #ip_vs_conn_status{tcp_state = syn_sent}}) -> false;
+is_opened(_KV) -> true.
+
+opened_or_dead(PD, Conns) ->
+    maps:filter(fun(KV) -> is_opened(KV) or is_dead(PD, Conns) end, Conns).
+
+-spec(record_connection(#ip_vs_conn{})-> ok).
+record_connection(Conn = #ip_vs_conn{tcp_state = syn_recv}) ->
     conn_failed(Conn);
-apply_connection(Conn = #ip_vs_conn{expires = Expires, tcp_state = syn_sent},
-                  PollDelay) when Expires < PollDelay ->
+record_connection(Conn = #ip_vs_conn{tcp_state = syn_sent}) ->
     conn_failed(Conn);
-apply_connection(#ip_vs_conn{tcp_state = syn_recv}, _PollDelay) -> ok;
-apply_connection(#ip_vs_conn{tcp_state = syn_sent}, _PollDelay) -> ok;
-apply_connection(Conn, _PollDelay) ->
+record_connection(Conn) ->
     conn_success(Conn).
 
 -spec(conn_failed(#ip_vs_conn{}) -> ok).
@@ -213,19 +226,26 @@ fmt_ip_port(IP, Port) ->
 -include_lib("eunit/include/eunit.hrl").
 
 new_conn_test_() ->
-    Conn = <<"foobar">>,
-    ConnStatus = #ip_vs_conn_status{conn_state = <<"conn_state">>, tcp_state = established},
-    New = new_connections(#{}, #{Conn => ConnStatus}),
-    New1 = new_connections(#{Conn => ConnStatus}, #{Conn => ConnStatus}),
-    [?_assertEqual(#{Conn => ConnStatus}, New),
-     ?_assertEqual(#{}, New1)].
+    Conn = <<"TCP 0A004FB6 F26D 0A004FB6 1F90 0A004FB6 1F91 ">>,
+    ConnStatus = #ip_vs_conn_status{conn_state = <<"50 ">>, tcp_state = established},
+    [?_assertEqual(#{Conn => ConnStatus}, new_connections(100, #{}, #{Conn => ConnStatus})),
+     ?_assertEqual(#{Conn => ConnStatus}, new_connections(0, #{}, #{Conn => ConnStatus})),
+     ?_assertEqual(#{}, new_connections(100, #{Conn => ConnStatus}, #{Conn => ConnStatus})),
+     ?_assertEqual(#{}, new_connections(0, #{Conn => ConnStatus}, #{Conn => ConnStatus}))].
 
 new_conn1_test_() ->
-    Conn = <<"foobar">>,
-    ConnStatus0 = #ip_vs_conn_status{conn_state = <<"0">>, tcp_state = syn_recv},
-    ConnStatus1 = #ip_vs_conn_status{conn_state = <<"1">>, tcp_state = syn_recv},
-    New = new_connections(#{Conn => ConnStatus0}, #{Conn => ConnStatus1}),
-    [?_assertEqual(#{Conn => ConnStatus1}, New)].
+    Conn = <<"TCP 0A004FB6 F26D 0A004FB6 1F90 0A004FB6 1F91 ">>,
+    ConnStatus1 = #ip_vs_conn_status{conn_state = <<"50 ">>, tcp_state = syn_recv},
+    ConnStatus2 = #ip_vs_conn_status{conn_state = <<"50 ">>, tcp_state = syn_sent},
+    [?_assertEqual(true, is_dead(100, {Conn, ConnStatus1})),
+     ?_assertEqual(false, is_dead(0, {Conn, ConnStatus1})),
+     ?_assertEqual(false, is_opened({Conn, ConnStatus1})),
+     ?_assertEqual(#{Conn => ConnStatus1}, new_connections(100, #{}, #{Conn => ConnStatus1})),
+     ?_assertEqual(#{Conn => ConnStatus2}, new_connections(100, #{}, #{Conn => ConnStatus2})),
+     ?_assertEqual(#{}, new_connections(25, #{}, #{Conn => ConnStatus2})),
+     ?_assertEqual(#{}, new_connections(25, #{Conn => ConnStatus2}, #{Conn => ConnStatus2})),
+     ?_assertEqual(#{}, new_connections(100, #{Conn => ConnStatus2}, #{Conn => ConnStatus2}))
+    ].
 
 get_p99s_test_() ->
     DAddr = {54, 192, 147, 29},
