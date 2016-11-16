@@ -24,10 +24,10 @@
   ]).
 
 metrics_interval_seconds() ->
-  application:get_env(minuteman, metrics_interval_seconds, 60).
+  application:get_env(minuteman, metrics_interval_seconds, 20).
 
 metrics_splay_seconds() ->
-  application:get_env(minuteman, metrics_interval_seconds, 10).
+  application:get_env(minuteman, metrics_interval_seconds, 2).
 
 minuteman_iface() ->
   application:get_env(minuteman, iface, "minuteman").
