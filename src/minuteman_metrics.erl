@@ -101,12 +101,19 @@ check_connections(OldConns) ->
     OnlyNewConns = new_connections(OldConns, Conns),
     Parsed = lists:map(fun ip_vs_conn:parse/1, maps:to_list(OnlyNewConns)),
     lists:foreach(fun (C) -> check_connections(C, PollDelay) end, Parsed),
-    ParsedMap = maps:from_list(lists:map(fun vip_addr_map/1, Parsed)),
+    ParsedMap = lists:foldl(fun vip_addr_map/2, #{}, Parsed),
     {ok, Metrics} = tcp_metrics_monitor:get_metrics(),
-    lists:foreach(fun (Metric) -> update_p99(ParsedMap, Metric) end, Metrics),
+    P99s = get_p99s(ParsedMap, Metrics),
+    lists:foreach(fun apply_p99/1, P99s),
     Conns.
 
-vip_addr_map(C = #ip_vs_conn{to_ip = VIP}) -> {int_to_ip(VIP), C}.
+vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z) ->
+    vip_addr_map(C, Z, maps:get(int_to_ip(IP), Z, undefined)).
+
+vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z, undefined) ->
+    maps:put(int_to_ip(IP), [C], Z);
+vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z, Ls) ->
+    maps:put(int_to_ip(IP), [C | Ls], Z).
 
 new_connections(OldConns, AllConns) ->
     maps:filter(fun(K,V) -> has_new_state(OldConns, {K,V}) end, AllConns).
@@ -141,24 +148,33 @@ conn_success(#ip_vs_conn{dst_ip = IP, dst_port = Port,
     AggTags = [[hostname], [hostname, backend]],
     telemetry:counter(mm_connect_successes, Tags, AggTags, 1).
 
-update_p99(Conns, {netlink,tcp_metrics,_, _, _, {get,_,_,Attrs}}) ->
+get_p99s(Conns, Metrics) ->
+    lists:flatmap(fun (M) -> get_p99_updates(Conns, M) end, Metrics).
+
+get_p99_updates(Conns, {netlink,tcp_metrics,_, _, _, {get,_,_,Attrs}}) ->
     match_metrics(Conns, proplists:get_value(d_addr, Attrs), proplists:get_value(vals, Attrs)).
 
-match_metrics(_, undefined, _) -> ok;
-match_metrics(_, _, undefined) -> ok;
+match_metrics(_, undefined, _) -> [];
+match_metrics(_, _, undefined) -> [];
 match_metrics(Conns, Addr, Vals) -> match_conn(maps:get(Addr, Conns, undefined),
                                                proplists:get_value(rtt_us, Vals), 
                                                proplists:get_value(rtt_var_us, Vals)).
-match_conn(undefined, _, _) -> ok;
-match_conn(_, undefined, _) -> ok;
-match_conn(_, _, undefined) -> ok;
-match_conn(#ip_vs_conn{dst_ip = IP, dst_port = Port,
-                       to_ip = VIP, to_port = VIPPort},
-             RttUs, RttVarUs) ->
+match_conn(undefined, _, _) -> [];
+match_conn(_, undefined, _) -> [];
+match_conn(_, _, undefined) -> [];
+match_conn(Conns, RttUs, RttVarUs) -> [{Conns, RttUs, RttVarUs}].
+
+apply_p99({Conns, RttUs, RttVarUs}) ->
+    lists:foreach(fun(C) -> apply_p99(C, RttUs, RttVarUs) end, Conns).
+
+apply_p99(#ip_vs_conn{dst_ip = IP, dst_port = Port,
+                      to_ip = VIP, to_port = VIPPort},
+          RttUs, RttVarUs) ->
     P99 = erlang:round(1000*(RttUs + math:sqrt(RttVarUs)*3)),
     Tags = named_tags(IP, Port, VIP, VIPPort),
     AggTags = [[hostname], [hostname, backend]],
     telemetry:histogram(mm_connect_latency, Tags, AggTags, P99).
+
 
 -spec(named_tags(IIP :: integer(),
                  Port :: inet:port_numbrer(),
@@ -186,7 +202,7 @@ fmt_ip_port(IP, Port) ->
 new_conn_test_() ->
     Conn = <<"foobar">>,
     ConnStatus = #ip_vs_conn_status{conn_state = <<"conn_state">>, tcp_state = established},
-    New = new_connections(#{}, [{Conn, ConnStatus}]),
+    New = new_connections(#{}, #{Conn => ConnStatus}),
     New1 = new_connections(#{Conn => ConnStatus}, #{Conn => ConnStatus}),
     [?_assertEqual(#{Conn => ConnStatus}, New),
      ?_assertEqual(#{}, New1)].
@@ -197,5 +213,26 @@ new_conn1_test_() ->
     ConnStatus1 = #ip_vs_conn_status{conn_state = <<"1">>, tcp_state = syn_recv},
     New = new_connections(#{Conn => ConnStatus0}, #{Conn => ConnStatus1}),
     [?_assertEqual(#{Conn => ConnStatus1}, New)].
+
+get_p99s_test_() ->
+    DAddr = {54,192,147,29},
+    Attrs = [{d_addr,DAddr},
+             {s_addr,{10,0,79,182}},
+             {age_ms,806101408},
+             {vals,[{rtt_us,47313},
+                    {rtt_ms,47},
+                    {rtt_var_us,23656},
+                    {rtt_var_ms,23},
+                    {cwnd,10}]}],
+    Metrics = [{netlink,tcp_metrics, [multi], 18,31595, {get,1,0,Attrs}}],
+    IP = 16#36c0931d,
+    Conn = {ip_vs_conn,tcp,established,167792566,47808,167792566,8080,IP,8081,59},
+    Conn2 = {ip_vs_conn,tcp,established,167792567,47808,167792566,8080,IP,8081,59},
+    DAddr = int_to_ip(IP), 
+    ConnMap = #{DAddr => [Conn]},
+    ConnMap2 = #{DAddr => [Conn, Conn2]},
+    [?_assertEqual(DAddr, int_to_ip(IP)),
+     ?_assertEqual([{[Conn], 47313, 23656}], get_p99s(ConnMap, Metrics)),
+     ?_assertEqual([{[Conn, Conn2], 47313, 23656}], get_p99s(ConnMap2, Metrics))].
 
 -endif.
