@@ -69,7 +69,6 @@ handle_cast(_Request, State) ->
     {stop, Reason :: term(), NewState :: #state{}}).
 handle_info(push_metrics, State = #state{}) ->
     ok = ip_vs_conn_monitor:get_connections(update_connections),
-    ok = tcp_metrics_monitor:get_metrics(update_metrics),
     erlang:send_after(splay_ms(), self(), push_metrics),
     {noreply, State};
 handle_info({update_metrics, Metrics}, State = #state{}) ->
@@ -77,7 +76,11 @@ handle_info({update_metrics, Metrics}, State = #state{}) ->
     {noreply, State};
 handle_info({update_connections, Conns}, State = #state{}) ->
     {NewConns, NewBackends} = update_connections(State#state.conns, Conns),
+    erlang:send_after(1, self(), start_update_metrics),
     {noreply, State#state{conns = NewConns, backend_conns = NewBackends}};
+handle_info(start_update_metrics, State) ->
+    ok = tcp_metrics_monitor:get_metrics(update_metrics),
+    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
