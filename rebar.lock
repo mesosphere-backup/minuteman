@@ -40,7 +40,7 @@
   2},
  {<<"gen_netlink">>,
   {git,"https://github.com/mesosphere/gen_netlink.git",
-       {ref,"4615bd1a17417e957d6c1b56957e83c722d14c8f"}},
+       {ref,"35ae8277046c4eccfcce0bdc6ee056723c00c231"}},
   0},
  {<<"goldrush">>,
   {git,"git://github.com/DeadZen/goldrush.git",
