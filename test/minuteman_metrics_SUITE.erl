@@ -36,12 +36,13 @@ test_wait_metrics(_Config) ->
     ct:pal("reaped ~p", [R]),
     ok.
 
-test_new_data(_Config) ->
+test_new_data(Config) ->
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
     timer:sleep(1000),
     R = telemetry_store:reap(),
     ct:pal("reaped1 ~p", [R]),
-    ProcFile = "../../../../testdata/proc_ip_vs_conn3",
+    DataDir = ?config(data_dir, Config),
+    ProcFile = DataDir ++ "/proc_ip_vs_conn3",
     application:set_env(ip_vs_conn, proc_file, ProcFile),
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
     timer:sleep(1000),
@@ -76,8 +77,12 @@ test_named_vip(_Config) ->
     ct:pal("reaped ~p", [R]),
     ok.
 
-proc_file(test_one_conn) -> "minuteman_metrics_SUITE_data/proc_ip_vs_conn1";
-proc_file(_) -> "minuteman_metrics_SUITE_data/proc_ip_vs_conn2".
+proc_file(Config, test_one_conn) ->
+    DataDir = ?config(data_dir, Config),
+    DataDir ++ "/proc_ip_vs_conn1";
+proc_file(Config, _) ->
+    DataDir = ?config(data_dir, Config),
+    DataDir ++ "/proc_ip_vs_conn2".
 
 set_interval(test_wait_metrics) ->
     application:set_env(minuteman, metrics_interval_seconds, 1),
@@ -85,16 +90,16 @@ set_interval(test_wait_metrics) ->
 set_interval(_) -> ok.
 
 init_per_testcase(Test, Config) ->
-  application:set_env(ip_vs_conn, proc_file, proc_file(Test)),
-  case os:cmd("id -u") of
-    "0\n" ->
-      ok;
-    _ ->
-      application:set_env(minuteman, enable_networking, false)
-  end,
-  set_interval(Test),
-  {ok, _} = application:ensure_all_started(minuteman),
-  Config.
+    application:set_env(ip_vs_conn, proc_file, proc_file(Config, Test)),
+    case os:cmd("id -u") of
+        "0\n" ->
+            ok;
+        _ ->
+            application:set_env(minuteman, enable_networking, false)
+    end,
+    set_interval(Test),
+    {ok, _} = application:ensure_all_started(minuteman),
+    Config.
 
 end_per_testcase(_, _Config) ->
   ok = application:stop(minuteman).
