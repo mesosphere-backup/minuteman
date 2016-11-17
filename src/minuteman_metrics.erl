@@ -117,7 +117,7 @@ update_connections(OldConns, Conns) ->
     NewBackends = dst_ip_map(Parsed),
     OpenedOrDead = opened_or_dead(PollDelay, Conns),
     {OpenedOrDead, NewBackends}.
-    
+
 -spec(update_metrics(conn_map(), metrics()) -> [{#ip_vs_conn{}, integer(), integer()}]).
 update_metrics(Backends, Metrics) ->
     P99s = get_p99s(Backends, Metrics),
@@ -141,11 +141,11 @@ new_connections(PD, Conns, AllConns) ->
 new_connection(PD, Conns, {K, V}) -> not(maps:is_key(K, Conns)) and (is_opened({K, V}) or is_dead(PD, {K, V})).
 
 %% only dead if its half opened and about to expire
-is_dead(PD, {K, V=#ip_vs_conn_status{tcp_state = syn_recv}}) -> 
-    Conn = ip_vs_conn:parse({K,V}),
+is_dead(PD, {K, V=#ip_vs_conn_status{tcp_state = syn_recv}}) ->
+    Conn = ip_vs_conn:parse({K, V}),
     PD > Conn#ip_vs_conn.expires;
 is_dead(PD, {K, V=#ip_vs_conn_status{tcp_state = syn_sent}}) ->
-    Conn = ip_vs_conn:parse({K,V}),
+    Conn = ip_vs_conn:parse({K, V}),
     PD > Conn#ip_vs_conn.expires;
 is_dead(_PD, _KV) -> false.
 
@@ -156,7 +156,7 @@ is_opened(_KV) -> true.
 
 -spec(opened_or_dead(integer(), conn_map()) -> conn_map()).
 opened_or_dead(PD, Conns) ->
-    maps:filter(fun(K, V) -> is_opened({K,V}) or is_dead(PD, {K,V}) end, Conns).
+    maps:filter(fun(K, V) -> is_opened({K, V}) or is_dead(PD, {K, V}) end, Conns).
 
 -spec(record_connection(#ip_vs_conn{})-> ok).
 record_connection(Conn = #ip_vs_conn{tcp_state = syn_recv}) ->
