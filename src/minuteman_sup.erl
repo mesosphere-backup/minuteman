@@ -22,36 +22,13 @@ start_link() ->
 %% Supervisor callbacks
 %% ===================================================================
 
-
-maybe_add_network_child(Children) ->
-    case minuteman_config:networking() of
-        true ->
-            [?CHILD(minuteman_network_sup, supervisor)|Children];
-        false ->
-            Children
-    end.
-add_default_children(Children) ->
-    {ok, _App} = application:get_application(?MODULE),
-    Webmachine = {minuteman_wm, {minuteman_wm, start, []},
-           permanent, 5000, worker, [minuteman_wm, mochiweb_socket_server]},
-
-    [
-        Webmachine,
-        ?CHILD(minuteman_vip_events, worker),
-        ?CHILD(minuteman_ipsets, worker),
-        ?CHILD(minuteman_vip_server, worker),
-        ?CHILD(minuteman_metric_cleaner, worker),
-        ?CHILD(minuteman_lashup_vip_listener, worker),
-        ?CHILD(minuteman_mesos_poller, worker),
-        ?CHILD(minuteman_lashup_publish, worker),
-        ?CHILD(minuteman_lashup_index, worker)|
-        Children
-    ].
-
 get_children() ->
-    Children1 = maybe_add_network_child([]),
-    Children2 = add_default_children(Children1),
-    Children2.
+    [
+        ?CHILD(minuteman_network_sup, supervisor),
+        ?CHILD(minuteman_mesos_poller, worker),
+        ?CHILD(minuteman_metrics, worker),
+        ?CHILD(minuteman_lashup_publish, worker)
+    ].
 
 init([]) ->
     {ok, { {one_for_one, 5, 10}, get_children()} }.

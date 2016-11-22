@@ -9,17 +9,15 @@
                   kernel,
                   stdlib,
                   lager,
-                  exometer_core,
                   inets,
-                  pkt,
                   jsx,
                   lashup,
                   telemetry,
-                  gen_socket,
-                  mochiweb,
-                  webmachine,
                   dns,
-                  mesos_state
+                  mesos_state,
+                  procket,
+                  ip_vs_conn,
+                  tcp_metrics
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}

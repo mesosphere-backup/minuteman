@@ -9,9 +9,8 @@ end.
 Fun =
     fun
         ({applications, Applications}) when Platform =/= linux ->
-            Applications1 = lists:delete(gen_socket, Applications),
-            Applications2 = lists:delete(gen_netlink, Applications1),
-            {applications, Applications2};
+            Applications1 = lists:delete(procket, Applications),
+            {applications, Applications1};
         ({env, Env}) when Platform =/= linux ->
             Env1 = lists:keystore(enable_networking, 1, Env, {enable_networking, false}),
             {env, Env1};
