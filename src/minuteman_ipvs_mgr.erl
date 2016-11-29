@@ -138,8 +138,8 @@ start_link() ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    {ok, Pid} = minuteman_netlink:start_link(),
-    {ok, Family} = minuteman_netlink:get_family(Pid, "IPVS"),
+    {ok, Pid} = gen_netlink_client:start_link(),
+    {ok, Family} = gen_netlink_client:get_family(Pid, "IPVS"),
     {ok, #state{netlink_generic = Pid, family = Family}}.
 
 %%--------------------------------------------------------------------
@@ -285,7 +285,7 @@ handle_get_services(#state{netlink_generic = Pid, family = Family}) ->
                 {protocol, Protocol}
             ]}
         ]},
-    {ok, Replies} = minuteman_netlink:request(Pid, Family, ipvs, [root, match], Message),
+    {ok, Replies} = gen_netlink_client:request(Pid, Family, ipvs, [root, match], Message),
     [proplists:get_value(service, MaybeService) || #netlink{msg = #new_service{request = MaybeService}} <- Replies,
         proplists:is_defined(service, MaybeService)].
 
@@ -295,7 +295,7 @@ handle_remove_service(IP, Port, State) ->
     handle_remove_service(Service, State).
 
 handle_remove_service(Service, #state{netlink_generic = Pid, family = Family}) ->
-    case minuteman_netlink:request(Pid, Family, ipvs, [], #del_service{request = [{service, Service}]}) of
+    case gen_netlink_client:request(Pid, Family, ipvs, [], #del_service{request = [{service, Service}]}) of
         {ok, _} -> ok;
         _ -> error
     end.
@@ -312,14 +312,14 @@ handle_add_service(IP, Port, #state{netlink_generic = Pid, family = Family}) ->
     ],
     Service1 = ip_to_address(IP) ++ Service0,
     lager:info("Adding Service: ~p", [Service1]),
-    case minuteman_netlink:request(Pid, Family, ipvs, [], #new_service{request = [{service, Service1}]}) of
+    case gen_netlink_client:request(Pid, Family, ipvs, [], #new_service{request = [{service, Service1}]}) of
         {ok, _} -> ok;
         _ -> error
     end.
 
 handle_get_dests(Service, #state{netlink_generic = Pid, family = Family}) ->
     Message = #get_dest{request = [{service, Service}]},
-    {ok, Replies} = minuteman_netlink:request(Pid, Family, ipvs, [root, match], Message),
+    {ok, Replies} = gen_netlink_client:request(Pid, Family, ipvs, [root, match], Message),
     [proplists:get_value(dest, MaybeDest) || #netlink{msg = #new_dest{request = MaybeDest}} <- Replies,
         proplists:is_defined(dest, MaybeDest)].
 
@@ -333,7 +333,7 @@ handle_add_dest(Service, IP, Port, #state{netlink_generic = Pid, family = Family
     Dest = [{port, Port}] ++ Base ++ ip_to_address(IP),
     lager:info("Adding backend ~p to service ~p~n", [{IP, Port}, Service]),
     Msg = #new_dest{request = [{dest, Dest}, {service, Service}]},
-    case minuteman_netlink:request(Pid, Family, ipvs, [], Msg) of
+    case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
         {ok, _} -> ok;
         _ -> error
     end.
@@ -347,7 +347,7 @@ handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, State) ->
 handle_remove_dest(Service, Dest, #state{netlink_generic = Pid, family = Family}) ->
     lager:info("Deleting Dest: ~p~n", [Dest]),
     Msg = #del_dest{request = [{dest, Dest}, {service, Service}]},
-    case minuteman_netlink:request(Pid, Family, ipvs, [], Msg) of
+    case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
         {ok, _} -> ok;
         _ -> error
     end.
