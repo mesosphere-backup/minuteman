@@ -72,7 +72,7 @@ start_link() ->
     {ok, State :: state()} | {ok, State :: state(), timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    {ok, Pid} = minuteman_netlink:start_link(?NETLINK_ROUTE),
+    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
     Routes = get_routes(Pid),
     ensure_fib_rule(Pid),
     {ok, #state{netlink = Pid, routes = Routes}}.
@@ -164,7 +164,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 get_routes(Pid) ->
-    {ok, Raw} = minuteman_netlink:rtnl_request(Pid, getroute, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
+    {ok, Raw} = gen_netlink_client:rtnl_request(Pid, getroute, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
     Routes0 =
         [proplists:get_value(dst, element(10, Msg)) ||
             #rtnetlink{msg = Msg} <- Raw, element(5, Msg) == ?MINUTEMAN_TABLE],
@@ -190,7 +190,7 @@ add_route(Dst, #state{netlink = Pid}) ->
         _Type = unicast,
         _Flags = [],
         Msg},
-    {ok, _} = minuteman_netlink:rtnl_request(Pid, newroute, [create, excl], Route).
+    {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, excl], Route).
 
 remove_route(Dst, #state{netlink = Pid}) ->
     Msg = [{table, ?MINUTEMAN_TABLE}, {dst, Dst}, {oif, ?IFIDX_LO}],
@@ -205,10 +205,10 @@ remove_route(Dst, #state{netlink = Pid}) ->
         _Type = unicast,
         _Flags = [],
         Msg},
-    {ok, _} = minuteman_netlink:rtnl_request(Pid, delroute, [], Route).
+    {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
 
 ensure_fib_rule(Pid) ->
-    {ok, Rules} = minuteman_netlink:rtnl_request(Pid, getrule, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
+    {ok, Rules} = gen_netlink_client:rtnl_request(Pid, getrule, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
     %% See if there is a rule that goes to table ?MINUTEMAN_TABLE
     Match = [Msg || #rtnetlink{msg = Msg} <- Rules, proplists:get_value(table, element(10, Msg)) == ?MINUTEMAN_TABLE],
     case Match of
@@ -226,7 +226,7 @@ ensure_fib_rule(Pid) ->
                 _Flags = [],
                 Msg
             },
-            minuteman_netlink:rtnl_request(Pid, newrule, [create, excl], Rule);
+            gen_netlink_client:rtnl_request(Pid, newrule, [create, excl], Rule);
         _ ->
             ok
     end.

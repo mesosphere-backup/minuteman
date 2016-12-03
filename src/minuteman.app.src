@@ -15,7 +15,6 @@
                   telemetry,
                   dns,
                   mesos_state,
-                  procket,
                   ip_vs_conn,
                   tcp_metrics,
                   gen_netlink
