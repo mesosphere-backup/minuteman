@@ -18,7 +18,8 @@
                   procket,
                   ip_vs_conn,
                   tcp_metrics,
-                  gen_netlink
+                  gen_netlink,
+                  mesos_state
                  ]},
   {mod, { minuteman_app, []}},
   {env, []}
