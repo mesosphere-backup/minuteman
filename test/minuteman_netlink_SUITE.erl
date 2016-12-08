@@ -49,8 +49,8 @@ enc_generic(_Config) ->
     Out = <<32, 0, 0, 0, 16, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 0, 0, 9, 0, 2, 0, 73, 80, 86, 83, 0, 0, 0, 0>>.
 
 getfamily(_Config) ->
-    {ok, Pid} = minuteman_netlink:start_link(),
-    {ok, _Family} = minuteman_netlink:get_family(Pid, "IPVS").
+    {ok, Pid} = gen_netlink_client:start_link(),
+    {ok, _Family} = gen_netlink_client:get_family(Pid, "IPVS").
 
 test_ipvs_mgr(_Config) ->
     %% Reset IPVS State
