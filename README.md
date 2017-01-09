@@ -89,7 +89,7 @@ You must have the command ipset installed. If you do not, you may see an error l
 15:15:59.731 [error] Unknown response: {ok,"iptables v1.4.21: Set minuteman doesn't exist.\n\nTry `iptables -h' or 'iptables --help' for more information.\n"}
 ```
 ### Ports
-The ports 61420, and 61421 must be open for the load balancer to work correctly. Because the load balancer maintains a partial mesh, it needs to ensure that connectivity between nodes is unhindered.
+The port 61420 must be open for the load balancer to work correctly. Because the load balancer maintains a partial mesh, it needs to ensure that connectivity between nodes is unhindered.
 
 ### Connection table exhaustion
 If you begin to see the behaviour as described earlier where the connection table is being exhausted, you'll see various errors in the logs. You can set two sysctls to alleviate this issue, but it doesn't come without caveats.
@@ -98,11 +98,6 @@ If you begin to see the behaviour as described earlier where the connection tabl
 1. `net.ipv4.tcp_tw_reuse=1` -- This sysctl can be dangerous and break firewalls, as well as NAT implementations. Although, if the firewall properly implements tracking TCP timestamps, it'll be okay. *Do not* set the `net.ipv4.tcp_tw_recycle` sysctl as it is RFC non-compliant and will break firewall connection tracking.
 
 More information about these sysctls can be found here: `https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt`.
-
-## Debugging
-The load balancer exposes a few endpoints on every node in the DC/OS cluster that can be used for gathering statistics. The URI for these metrics are: `http://localhost:61421/metrics`. This includes data about the backends, and the dataplane runtime.
-
-You can find out data about just the VIPs at the endpoint `http://localhost:61421/vips`. If you want to find information about just one VIP you can go to the endpoint `http://localhost:61421/vips/${IP}`.
 
 ## Implementation
 The local process polls the master node roughly every 5 seconds. The master node caches this for 5 seconds as well, bounding the propagation time for an update to roughly 11 seconds. Although this is the case for new VIPs, it is not the case for failed nodes.
