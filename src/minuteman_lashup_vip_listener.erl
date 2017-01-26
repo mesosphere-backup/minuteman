@@ -60,7 +60,7 @@
 -type ip_vip() :: {tcp, inet:ip4_address(), inet:port_number()}.
 -type vip_name() :: binary().
 -type named_vip() :: {tcp, {name, {vip_name(), framework_name()}}, inet:port_number()}.
--type vip() :: {ip_vip() | named_vip(), [ip_port()]}.
+-type vip() :: {ip_vip() | named_vip(), [{inet:ip4_address(), ip_port()}]}.
 
 
 
@@ -451,17 +451,17 @@ process_vips_test() ->
     VIPs = [
         {
             {{tcp, {1, 2, 3, 4}, 80}, riak_dt_orswot},
-            [{{10, 0, 3, 46}, 11778}]
+            [{{10, 0, 3, 46}, {{10, 0, 3, 46}, 11778}}]
         },
         {
             {{tcp, {name, {<<"/foo">>, <<"marathon">>}}, 80}, riak_dt_orswot},
-            [{{10, 0, 3, 46}, 25458}]
+            [{{10, 0, 3, 46}, {{10, 0, 3, 46}, 25458}}]
         }
     ],
     Out = process_vips(VIPs, State),
     Expected = [
-        {{tcp, {1, 2, 3, 4}, 80}, [{{10, 0, 3, 46}, 11778}]},
-        {{tcp, {11, 0, 0, 36}, 80}, [{{10, 0, 3, 46}, 25458}]}
+        {{tcp, {1, 2, 3, 4}, 80}, [{{10, 0, 3, 46}, {{10, 0, 3, 46}, 11778}}]},
+        {{tcp, {11, 0, 0, 36}, 80}, [{{10, 0, 3, 46}, {{10, 0, 3, 46}, 25458}}]}
     ],
     ?assertEqual(Expected, Out),
     State.
