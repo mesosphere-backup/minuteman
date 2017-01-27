@@ -53,6 +53,7 @@
     ref = erlang:error() :: reference(),
     min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
     max_ip_num = erlang:error(no_max_ip_num) :: ip4_num(),
+    retry_timer :: undefined | timer:tref(),
     vips
     }).
 -type state() :: #state{}.
@@ -158,9 +159,9 @@ handle_cast(_Request, State) ->
 handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Ref}) when Ref == Reference ->
     State1 = handle_event(Event, State0),
     {noreply, State1};
-handle_info(retry_spartan, State) ->
-    retry_spartan(State),
-    {noreply, State};
+handle_info(retry_spartan, State0) ->
+    State1 = retry_spartan(State0),
+    {noreply, State1};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -222,12 +223,13 @@ handle_lookup_vip(Arg)  -> {badmatch, Arg}.
 handle_event(_Event = #{value := VIPs}, State) ->
     handle_value(VIPs, State).
 
-handle_value(VIPs0, State0) ->
+handle_value(VIPs0, State0 = #state{retry_timer = Timer}) ->
+    timer:cancel(Timer),
     VIPs1 = process_vips(VIPs0, State0),
     State1 = State0#state{vips = VIPs1},
-    push_state_to_spartan(State1),
+    State2 = push_state_to_spartan(State1),
     minuteman_lb_mgr:push_vips(VIPs1),
-    State1.
+    State2.
 
 process_vips(VIPs0, State) ->
     VIPs1 = lists:map(fun rewrite_keys/1, VIPs0),
@@ -258,10 +260,13 @@ rewrite_name(Else) ->
 retry_spartan(State) ->
     push_state_to_spartan(State).
 
-push_state_to_spartan(State) ->
+push_state_to_spartan(State0) ->
     ZoneNames = ?ZONE_NAMES,
-    Zones = lists:map(fun(ZoneName) -> zone(ZoneName, State) end, ZoneNames),
-    push_zones(Zones).
+    Zones = lists:map(fun(ZoneName) -> zone(ZoneName, State0) end, ZoneNames),
+    push_zones(Zones),
+    Timer = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
+    State1 = State0#state{retry_timer = Timer},
+    State1.
 
 push_zones([]) ->
     ok;
@@ -270,7 +275,6 @@ push_zones([Zone|Zones]) ->
         ok ->
             push_zones(Zones);
         {error, Reason} ->
-            timer:send_after(?RPC_RETRY_TIME, retry_spartan),
             lager:warning("Aborting pushing zones to Spartan: ~p", [Reason]),
             error
     end.
