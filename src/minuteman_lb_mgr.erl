@@ -165,7 +165,11 @@ remove_service({_Protocol, IP, Port}, #state{ipvs_mgr = IPVSMgr}) ->
 
 add_service({_Protocol, IP, Port}, BEs, #state{ipvs_mgr = IPVSMgr}) ->
     minuteman_ipvs_mgr:add_service(IPVSMgr, IP, Port),
-    lists:foreach(fun({_AgentIP, {BEIP, BEPort}}) ->  minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort) end, BEs).
+    lists:foreach(
+        fun({_AgentIP, {BEIP, BEPort}}) ->
+            minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort)
+        end,
+        BEs).
 
 process_reachability(VIPs0, State) ->
     lists:map(fun({VIP, BEs0}) -> {VIP, reachable_backends(BEs0, State)} end, VIPs0).
@@ -274,7 +278,8 @@ generate_diffs_test() ->
                     ]
                 }
             ]),
-    ?assertEqual({[], [], [{{tcp, {11, 136, 231, 163}, 80}, [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 15671}}], []}]}, Diff1),
+    ?assertEqual(
+        {[], [], [{{tcp, {11, 136, 231, 163}, 80}, [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 15671}}], []}]}, Diff1),
     Diff2 =
         generate_diff(
             [
@@ -297,6 +302,9 @@ generate_diffs_test() ->
                     ]
                 }
             ]),
-    ?assertEqual({[], [], [{{tcp, {11, 136, 231, 163}, 80}, [{{10, 0, 1, 107},{{10, 0, 1, 107}, 18818}}, {{10, 0, 3, 98}, {{10, 0, 3, 98}, 12930}}], []}]},
-        Diff2).
+    ?assertEqual(
+        {[], [], [{{tcp, {11, 136, 231, 163}, 80},
+                     [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 18818}},
+                      {{10, 0, 3, 98}, {{10, 0, 3, 98}, 12930}}],
+         []}]}, Diff2).
 -endif.
