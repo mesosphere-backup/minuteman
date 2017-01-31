@@ -79,7 +79,7 @@
        {ref,"ffbb9b631829e2ddf3c7fb5113e9a4e726f032d7"}},
   1},
  {<<"riak_dt">>,
-  {git,"https://github.com/sargun/riak_dt.git",
+  {git,"https://github.com/dcos/riak_dt.git",
        {ref,"3394c86fbd54e194b4fd72ca72ad42127609a4d6"}},
   1},
  {<<"setup">>,
