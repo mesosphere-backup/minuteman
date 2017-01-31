@@ -264,7 +264,7 @@ push_state_to_spartan(State0) ->
     ZoneNames = ?ZONE_NAMES,
     Zones = lists:map(fun(ZoneName) -> zone(ZoneName, State0) end, ZoneNames),
     push_zones(Zones),
-    Timer = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
+    {ok, Timer} = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
     State1 = State0#state{retry_timer = Timer},
     State1.
 
