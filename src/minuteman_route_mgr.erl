@@ -22,17 +22,22 @@
     terminate/2,
     code_change/3]).
 
+-ifdef(TEST).
+-export([get_routes/2]).
+-endif.
+
 -define(SERVER, ?MODULE).
 
 -record(state, {
     netlink :: pid(),
-    routes :: ordsets:ordset()
+    routes :: ordsets:ordset(),
+    iface :: non_neg_integer()
 }).
 
 -type state() :: state().
 -include_lib("gen_netlink/include/netlink.hrl").
--define(MINUTEMAN_TABLE, 52).
--define(IFIDX_LO, 1).
+-define(LOCAL_TABLE, 255). %% local table
+-define(MINUTEMAN_IFACE, "minuteman").
 
 
 %%%===================================================================
@@ -73,9 +78,9 @@ start_link() ->
     {stop, Reason :: term()} | ignore).
 init([]) ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    Routes = get_routes(Pid),
-    ensure_fib_rule(Pid),
-    {ok, #state{netlink = Pid, routes = Routes}}.
+    Iface = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE),
+    Routes = get_routes(Pid, Iface),
+    {ok, #state{netlink = Pid, routes = Routes, iface = Iface}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -162,13 +167,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-get_routes(Pid) ->
-    {ok, Raw} = gen_netlink_client:rtnl_request(Pid, getroute, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
-    Routes0 =
-        [proplists:get_value(dst, element(10, Msg)) ||
-            #rtnetlink{msg = Msg} <- Raw, element(5, Msg) == ?MINUTEMAN_TABLE],
+get_routes(Pid, Iface) ->
+    Req = [{table, ?LOCAL_TABLE}, {oif, Iface}],
+    {ok, Raw} = gen_netlink_client:rtnl_request(Pid, getroute, [match, root],
+                                                {inet, 0, 0, 0, 0, 0, 0, 0, [], Req}),
+    Routes0 = [route_msg_dst(Msg) || #rtnetlink{msg = Msg} <- Raw,
+                                     Iface == route_msg_oif(Msg)],
     ordsets:from_list(Routes0).
+
+%% see netlink.hrl for the element position
+route_msg_oif(Msg) -> proplists:get_value(oif, element(10, Msg)).
+route_msg_dst(Msg) -> proplists:get_value(dst, element(10, Msg)).
 
 handle_update_routes(NewRoutes, State0 = #state{routes = OldRoutes}) ->
     RoutesToDelete = ordsets:subtract(OldRoutes, NewRoutes),
@@ -177,56 +186,32 @@ handle_update_routes(NewRoutes, State0 = #state{routes = OldRoutes}) ->
     lists:foreach(fun(Route) -> remove_route(Route, State0) end, RoutesToDelete),
     State0#state{routes = NewRoutes}.
 
-add_route(Dst, #state{netlink = Pid}) ->
-    Msg = [{table, ?MINUTEMAN_TABLE}, {dst, Dst}, {oif, ?IFIDX_LO}],
+add_route(Dst, #state{netlink = Pid, iface = Iface}) ->
+    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
         _PrefixLen = 32,
         _SrcPrefixLen = 0,
         _Tos = 0,
-        _Table = ?MINUTEMAN_TABLE,
+        _Table = ?LOCAL_TABLE,
         _Protocol = boot,
-        _Scope = link,
-        _Type = unicast,
+        _Scope = host,
+        _Type = local,
         _Flags = [],
         Msg},
     {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, excl], Route).
 
-remove_route(Dst, #state{netlink = Pid}) ->
-    Msg = [{table, ?MINUTEMAN_TABLE}, {dst, Dst}, {oif, ?IFIDX_LO}],
+remove_route(Dst, #state{netlink = Pid, iface = Iface}) ->
+    Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
     Route = {
         inet,
         _PrefixLen = 32,
         _SrcPrefixLen = 0,
         _Tos = 0,
-        _Table = ?MINUTEMAN_TABLE,
+        _Table = ?LOCAL_TABLE,
         _Protocol = boot,
-        _Scope = link,
-        _Type = unicast,
+        _Scope = host,
+        _Type = local,
         _Flags = [],
         Msg},
     {ok, _} = gen_netlink_client:rtnl_request(Pid, delroute, [], Route).
-
-ensure_fib_rule(Pid) ->
-    {ok, Rules} = gen_netlink_client:rtnl_request(Pid, getrule, [match, root], {inet, 0, 0, 0, 0, 0, 0, 0, [], []}),
-    %% See if there is a rule that goes to table ?MINUTEMAN_TABLE
-    Match = [Msg || #rtnetlink{msg = Msg} <- Rules, proplists:get_value(table, element(10, Msg)) == ?MINUTEMAN_TABLE],
-    case Match of
-        [] ->
-            Msg = [{priority, 10000}, {table, ?MINUTEMAN_TABLE}],
-            Rule = {
-                inet,
-                _PrefixLen = 0,
-                _SrcPrefixLen = 0,
-                _Tos = 0,
-                _Table = ?MINUTEMAN_TABLE,
-                _Protocol = unspec,
-                _Scope = universe,
-                _Type = unicast,
-                _Flags = [],
-                Msg
-            },
-            gen_netlink_client:rtnl_request(Pid, newrule, [create, excl], Rule);
-        _ ->
-            ok
-    end.

@@ -16,7 +16,8 @@
 -include_lib("common_test/include/ct.hrl").
 
 %% API
--export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2, test_ipvs_mgr/1, test_route_mgr/1]).
+-export([all/0, enc_generic/1, getfamily/1, init_per_testcase/2,
+         end_per_testcase/2, test_ipvs_mgr/1, test_route_mgr/1]).
 
 %% root tests
 all() -> [enc_generic, test_ipvs_mgr, test_route_mgr].
@@ -38,6 +39,9 @@ init_per_testcase(0, _TestCase, Config) ->
     Config;
 init_per_testcase(_, _, _) ->
     {skip, "Not running as root"}.
+
+end_per_testcase(_, _Config) ->
+    os:cmd("ip link del minuteman").
 
 enc_generic(_Config) ->
     Pid = 0,
@@ -75,13 +79,26 @@ has_vip(IP, Port) ->
 %    0 =/= string:str(Data, BEEntry1).
 
 routes() ->
-    Data = os:cmd("ip route show table 52"),
+    Data = os:cmd("ip route show table local"),
     Lines = string:tokens(Data, "\n"),
-    lists:map(fun string:strip/1, Lines).
+    Routes = lists:map(fun string:strip/1, Lines),
+    ct:pal("got routes ~p", [Routes]),
+    Routes.
+
+get_routes() ->
+    {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
+    Iface = gen_netlink_client:if_nametoindex("minuteman"),
+    ordsets:to_list(minuteman_route_mgr:get_routes(Pid, Iface)).
 
 test_route_mgr(_Config) ->
+    os:cmd("ip link add minuteman type dummy"),
     {ok, Pid} = minuteman_route_mgr:start_link(),
+    [] = get_routes(),
     minuteman_route_mgr:update_routes(Pid, [{1, 2, 3, 4}]),
-    ["1.2.3.4 dev lo  scope link"] = routes(),
+    R = "local 1.2.3.4 dev minuteman  scope host",
+    true = lists:member(R,  routes()),
+    [{1, 2, 3, 4}] = get_routes(),
     minuteman_route_mgr:update_routes(Pid, []),
-    [] = routes().
+    false = lists:member(R,  routes()),
+    [] = get_routes().
+
