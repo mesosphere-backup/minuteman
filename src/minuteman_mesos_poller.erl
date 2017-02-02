@@ -613,5 +613,12 @@ named_vips_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
+
+missing_port_test() ->
+    {ok, Data} = file:read_file("testdata/missing-port.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [],
+    ?assertEqual(Expected, VIPBes).
 -endif.
 
