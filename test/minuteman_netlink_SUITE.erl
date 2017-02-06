@@ -87,7 +87,7 @@ routes() ->
 
 get_routes() ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    Iface = gen_netlink_client:if_nametoindex("minuteman"),
+    {ok, Iface} = gen_netlink_client:if_nametoindex("minuteman"),
     ordsets:to_list(minuteman_route_mgr:get_routes(Pid, Iface)).
 
 test_route_mgr(_Config) ->

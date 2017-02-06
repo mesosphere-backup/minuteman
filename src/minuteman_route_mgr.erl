@@ -78,7 +78,7 @@ start_link() ->
     {stop, Reason :: term()} | ignore).
 init([]) ->
     {ok, Pid} = gen_netlink_client:start_link(?NETLINK_ROUTE),
-    Iface = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE),
+    {ok, Iface} = gen_netlink_client:if_nametoindex(?MINUTEMAN_IFACE),
     Routes = get_routes(Pid, Iface),
     {ok, #state{netlink = Pid, routes = Routes, iface = Iface}}.
 
