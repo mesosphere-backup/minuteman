@@ -149,12 +149,12 @@ apply_diff({ServicesToAdd, ServicesToRemove, ServicesToModify}, State) ->
 
 modify_service({_Protocol, IP, Port}, BEAdd, BERemove, #state{ipvs_mgr = IPVSMgr}) ->
     lists:foreach(
-        fun({_AgentIP, {BEIP, BEPort}}) ->
+        fun({BEIP, BEPort}) ->
             minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort)
         end,
         BEAdd),
     lists:foreach(
-        fun({_AgentIP, {BEIP, BEPort}}) ->
+        fun({BEIP, BEPort}) ->
             minuteman_ipvs_mgr:remove_dest(IPVSMgr, IP, Port, BEIP, BEPort)
         end,
         BERemove).
@@ -165,11 +165,7 @@ remove_service({_Protocol, IP, Port}, #state{ipvs_mgr = IPVSMgr}) ->
 
 add_service({_Protocol, IP, Port}, BEs, #state{ipvs_mgr = IPVSMgr}) ->
     minuteman_ipvs_mgr:add_service(IPVSMgr, IP, Port),
-    lists:foreach(
-        fun({_AgentIP, {BEIP, BEPort}}) ->
-            minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort)
-        end,
-        BEs).
+    lists:foreach(fun({BEIP, BEPort}) -> minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort) end, BEs).
 
 process_reachability(VIPs0, State) ->
     lists:map(fun({VIP, BEs0}) -> {VIP, reachable_backends(BEs0, State)} end, VIPs0).
@@ -234,7 +230,7 @@ reachable_backends([], _OpenBackends = [], ClosedBackends, _State) ->
     ClosedBackends;
 reachable_backends([], OpenBackends, _ClosedBackends, _State) ->
     OpenBackends;
-reachable_backends([BE = {_AgentIP, {IP, _Port}}|Rest], OB, CB, State = #state{ip_mapping = IPMapping, tree = Tree}) ->
+reachable_backends([BE = {IP, _Port}|Rest], OB, CB, State = #state{ip_mapping = IPMapping, tree = Tree}) ->
     case IPMapping of
         #{IP := NodeName} ->
             case lashup_gm_route:distance(NodeName, Tree) of
@@ -262,32 +258,32 @@ generate_diffs_test() ->
                 {
                     {tcp, {11, 136, 231, 163}, 80},
                     [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 8895}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 16319}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 3892}}
+                        {{10, 0, 3, 98}, 8895},
+                        {{10, 0, 1, 107}, 16319},
+                        {{10, 0, 1, 107}, 3892}
                     ]
                 }
             ],
             [
                 {{tcp, {11, 136, 231, 163}, 80},
                     [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 8895}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 16319}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 15671}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 3892}}
+                        {{10, 0, 3, 98}, 8895},
+                        {{10, 0, 1, 107}, 16319},
+                        {{10, 0, 1, 107}, 15671},
+                        {{10, 0, 1, 107}, 3892}
                     ]
                 }
             ]),
     ?assertEqual(
-        {[], [], [{{tcp, {11, 136, 231, 163}, 80}, [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 15671}}], []}]}, Diff1),
+        {[], [], [{{tcp, {11, 136, 231, 163}, 80}, [{{10, 0, 1, 107}, 15671}], []}]}, Diff1),
     Diff2 =
         generate_diff(
             [
                 {
                     {tcp, {11, 136, 231, 163}, 80},
                     [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 23520}},
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 1132}}
+                        {{10, 0, 3, 98}, 23520},
+                        {{10, 0, 3, 98}, 1132}
                     ]
                 }
             ],
@@ -295,16 +291,16 @@ generate_diffs_test() ->
                 {
                     {tcp, {11, 136, 231, 163}, 80},
                     [
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 23520}},
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 12930}},
-                        {{10, 0, 3, 98}, {{10, 0, 3, 98}, 1132}},
-                        {{10, 0, 1, 107}, {{10, 0, 1, 107}, 18818}}
+                        {{10, 0, 3, 98}, 23520},
+                        {{10, 0, 3, 98}, 12930},
+                        {{10, 0, 3, 98}, 1132},
+                        {{10, 0, 1, 107}, 18818}
                     ]
                 }
             ]),
     ?assertEqual(
         {[], [], [{{tcp, {11, 136, 231, 163}, 80},
-                     [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 18818}},
-                      {{10, 0, 3, 98}, {{10, 0, 3, 98}, 12930}}],
+                     [{{10, 0, 1, 107}, 18818},
+                      {{10, 0, 3, 98}, 12930}],
          []}]}, Diff2).
 -endif.
