@@ -35,7 +35,6 @@
 -type state_name() :: uninitialized | initialized | notree.
 
 
--define(MINUTEMAN_IFACE, "minuteman").
 %% API
 -export([start_link/0]).
 -export([push_vips/1]).
