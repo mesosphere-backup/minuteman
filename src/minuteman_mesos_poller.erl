@@ -581,6 +581,26 @@ state4_test() ->
     ],
     ?assertEqual(Expected, VIPBes).
 
+state5_test() ->
+    {ok, Data} = file:read_file("testdata/state5.json"),
+    {ok, MesosState} = mesos_state_client:parse_response(Data),
+    VIPBes = collect_vips(MesosState, fake_state()),
+    Expected = [
+        {
+            {tcp, {1, 2, 3, 4}, 5000},
+            [
+                {{10, 0, 0, 243}, {{10, 0, 0, 243}, 26645}}
+            ]
+        },
+        {
+            {udp, {1, 2, 3, 4}, 5000},
+            [
+                {{10, 0, 0, 243}, {{10, 0, 0, 243}, 26645}}
+            ]
+        }
+    ],
+    ?assertEqual(Expected, VIPBes).
+
 di_state_test() ->
     {ok, Data} = file:read_file("testdata/state_di.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
