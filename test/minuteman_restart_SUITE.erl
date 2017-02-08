@@ -6,7 +6,9 @@
 all() -> [test_restart].
 
 
-test_restart(_Config) ->
+test_restart(Config) ->
+  PrivateDir = ?config(priv_dir, Config),
+  application:set_env(minuteman, agent_dets_basedir, PrivateDir),
   case os:cmd("id -u") of
     "0\n" ->
       ok;
@@ -18,4 +20,6 @@ test_restart(_Config) ->
   {ok, _} = application:ensure_all_started(minuteman),
   ok = application:stop(minuteman),
   {ok, _} = application:ensure_all_started(minuteman),
-  ok = application:stop(minuteman).
+  ok = application:stop(minuteman),
+  ok = application:stop(lashup),
+  ok = application:stop(mnesia).

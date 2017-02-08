@@ -32,6 +32,7 @@ all("0\n", false) ->
 all(_, _) -> [].
 
 init_per_testcase(_, Config) ->
+    PrivateDir = ?config(priv_dir, Config),
     "" = os:cmd("ipvsadm -C"),
     os:cmd("ip link del minuteman"),
     os:cmd("ip link add minuteman type dummy"),
@@ -41,13 +42,16 @@ init_per_testcase(_, Config) ->
     os:cmd("ip addr add 1.1.1.1/32 dev webserver"),
     os:cmd("ip addr add 1.1.1.2/32 dev webserver"),
     os:cmd("ip addr add 1.1.1.3/32 dev webserver"),
+    application:set_env(minuteman, agent_dets_basedir, PrivateDir),
     application:set_env(minuteman, agent_polling_enabled, false),
     {ok, _} = application:ensure_all_started(inets),
     {ok, _} = application:ensure_all_started(minuteman),
     Config.
 
 end_per_testcase(_, _Config) ->
-    ok = application:stop(minuteman).
+    ok = application:stop(minuteman),
+    ok = application:stop(lashup),
+    ok = application:stop(mnesia).
 
 make_webserver(Idx) ->
     file:make_dir("/tmp/htdocs"),
