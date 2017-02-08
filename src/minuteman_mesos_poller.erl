@@ -34,11 +34,11 @@
 -include("minuteman.hrl").
 -include_lib("mesos_state/include/mesos_state.hrl").
 -define(SERVER, ?MODULE).
-
-
 -define(VIP_PORT, "VIP_PORT").
+
 -record(state, {
     agent_ip = erlang:error() :: inet:ip4_address(),
+    backend_ips = ordsets:new() :: [inet:ip4_address()],
     last_poll_time = undefined :: integer() | undefined
 }).
 
@@ -94,7 +94,8 @@ init([]) ->
     PollInterval = minuteman_config:agent_poll_interval(),
     timer:send_after(PollInterval, poll),
     AgentIP = mesos_state:ip(),
-    {ok, #state{agent_ip = AgentIP}}.
+    BEIPs = init_be(AgentIP),
+    {ok, #state{agent_ip = AgentIP, backend_ips = BEIPs}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -184,6 +185,17 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
+agent_be() ->
+    minuteman_config:agent_dets_path("agent_be").
+
+-spec(init_be(AgentIP ::inet:ip4_address()) -> [inet:ip4_address()]).
+init_be(AgentIP) ->
+    {ok, Name} = dets:open_file(agent_be(), []),
+    case dets:lookup(Name, AgentIP) of
+        [{AgentIP, BEIPs}] -> BEIPs;
+                _ -> ordsets:new()
+    end.
+
 maybe_poll(State) ->
     case minuteman_config:agent_polling_enabled() of
         true ->
@@ -212,21 +224,38 @@ handle_poll_failure(State = #state{last_poll_time = LastPollTime}) ->
     handle_poll_failure(TimeSinceLastPoll, State).
 
 handle_poll_failure(TimeSinceLastPoll, State) when TimeSinceLastPoll > ?AGENT_TIMEOUT_SECS ->
-    VIPBEs = [],
-    LashupVIPs = lashup_kv:value(?VIPS_KEY),
-    Ops = generate_ops(State#state.agent_ip, VIPBEs, LashupVIPs),
-    maybe_perform_ops(Ops),
-    State;
+    handle_poll_changes([], State);
 handle_poll_failure(_TimeSinceLastPoll, State) ->
     State.
 
 -spec(handle_poll_state(mesos_state_client:mesos_agent_state(), state()) -> state()).
-handle_poll_state(MesosState, State) ->
-    VIPBEs = collect_vips(MesosState, State),
+handle_poll_state(MesosState, State0) ->
+    VIPBEs = collect_vips(MesosState, State0),
+    FlatVIPBEs = flatten_vips(VIPBEs),
+    State1 = handle_poll_changes(FlatVIPBEs, State0),
+    State1#state{last_poll_time = erlang:monotonic_time()}.
+
+-spec(handle_poll_changes([vip_be()], state()) -> state()).
+handle_poll_changes(FlatVIPBEs, State) ->
+    AgentIP = State#state.agent_ip,
+    AgentBEs = State#state.backend_ips,
+    NewBEs = extract_bes(FlatVIPBEs),
     LashupVIPs = lashup_kv:value(?VIPS_KEY),
-    Ops = generate_ops(State#state.agent_ip, VIPBEs, LashupVIPs),
-    maybe_perform_ops(Ops),
-    State#state{last_poll_time = erlang:monotonic_time()}.
+    {AddOps, DelOps} = generate_ops(AgentBEs, FlatVIPBEs, LashupVIPs),
+    maybe_perform_update(AddOps, DelOps, NewBEs, AgentBEs, AgentIP),
+    State#state{backend_ips = NewBEs}.
+
+%% For data consistency, data in dets should always
+%% be a super set of data in lashup. Therefore,
+%% the order of updates is important.
+
+maybe_perform_update(AddOps, DelOps, NewBEs, OldBEs, AgentIP) ->
+    %% first delete from lashup
+    maybe_perform_ops(DelOps),
+    %% update dets
+    maybe_update_bes(NewBEs, OldBEs, AgentIP),
+    %% then add to lashup
+    maybe_perform_ops(AddOps).
 
 maybe_perform_ops([]) ->
     ok;
@@ -234,6 +263,20 @@ maybe_perform_ops(Ops) ->
     lager:debug("Performing Ops: ~p", [Ops]),
     {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, Ops}).
 
+-spec(maybe_update_bes(ordsets:ordset(inet:ip4_address()), ordsets:ordset(inet:ip4_address()),
+    inet:ip4_address()) -> ok).
+maybe_update_bes(NewBEs, OldBEs, AgentIP) ->
+    case NewBEs == OldBEs of
+        false ->
+            ok = dets:insert(agent_be(), {AgentIP, NewBEs}),
+            ok = dets:sync(agent_be());
+        true -> ok
+    end.
+
+-spec(extract_bes([vip_be()]) -> [inet:ip4_address()]).
+extract_bes(FlatVIPBEs) ->
+    NewBEs = [BE || #vip_be{backend_ip = BE} <- FlatVIPBEs],
+    ordsets:from_list(NewBEs).
 
 %% Generate ops generates ops in a specific order:
 %% 1. Add local backends
@@ -242,19 +285,16 @@ maybe_perform_ops(Ops) ->
 %% For this reason we have to reverse the ops before applying them
 %% Since the way that it generates this results in this list being reversed
 
-
-generate_ops(AgentIP, AgentVIPs, LashupVIPs) ->
-    lists:reverse(generate_ops1(AgentIP, AgentVIPs, LashupVIPs)).
-
-generate_ops1(AgentIP, AgentVIPs, LashupVIPs) ->
-    FlatAgentVIPs = flatten_vips(AgentVIPs),
+generate_ops(AgentBEIPs, FlatAgentVIPs, LashupVIPs) ->
     FlatLashupVIPs = flatten_vips(LashupVIPs),
     FlatVIPsToAdd = ordsets:subtract(FlatAgentVIPs, FlatLashupVIPs),
-    FlatLashupVIPsFromThisAgent = lists:filter(fun(#vip_be{backend_ip = BEIP}) -> BEIP == AgentIP end, FlatLashupVIPs),
+    FlatLashupVIPsFromThisAgent = lists:filter(
+        fun(#vip_be{backend_ip = BEIP}) -> ordsets:is_element(BEIP, AgentBEIPs) end, FlatLashupVIPs),
     FlatVIPsToDel = ordsets:subtract(FlatLashupVIPsFromThisAgent, FlatAgentVIPs),
-    Ops1 = lists:foldl(fun flat_vip_add_fold/2, [], FlatVIPsToAdd),
-    Ops2 = lists:foldl(fun flat_vip_del_fold/2, Ops1, FlatVIPsToDel),
-    add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, Ops2).
+    AddOps = lists:foldl(fun flat_vip_add_fold/2, [], FlatVIPsToAdd),
+    DelOps = lists:foldl(fun flat_vip_del_fold/2, [], FlatVIPsToDel),
+    add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, DelOps),
+    {lists:reverse(AddOps), lists:reverse(DelOps)}.
 
 add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, Ops0) ->
     ExistingProtocolVIPs = lists:map(fun to_protocol_vip/1, FlatLashupVIPs),
