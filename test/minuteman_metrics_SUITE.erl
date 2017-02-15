@@ -104,4 +104,6 @@ init_per_testcase(Test, Config) ->
     Config.
 
 end_per_testcase(_, _Config) ->
-  ok = application:stop(minuteman).
+  ok = application:stop(minuteman),
+  ok = application:stop(lashup),
+  ok = application:stop(mnesia).

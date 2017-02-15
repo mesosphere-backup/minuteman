@@ -59,4 +59,6 @@ init_per_testcase(_, Config) ->
 
 end_per_testcase(test_uninitalized_table, _Config) -> ok;
 end_per_testcase(_, _Config) ->
-  ok = application:stop(minuteman).
+  ok = application:stop(minuteman),
+  ok = application:stop(lashup),
+  ok = application:stop(mnesia).

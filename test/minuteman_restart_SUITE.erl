@@ -20,4 +20,6 @@ test_restart(Config) ->
   {ok, _} = application:ensure_all_started(minuteman),
   ok = application:stop(minuteman),
   {ok, _} = application:ensure_all_started(minuteman),
-  ok = application:stop(minuteman).
+  ok = application:stop(minuteman),
+  ok = application:stop(lashup),
+  ok = application:stop(mnesia).
