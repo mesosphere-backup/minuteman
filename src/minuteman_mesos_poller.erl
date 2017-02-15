@@ -29,6 +29,7 @@
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-export([handle_poll_state/2]).
 -endif.
 
 -include("minuteman.hrl").
@@ -676,5 +677,6 @@ missing_port_test() ->
     VIPBes = collect_vips(MesosState, fake_state()),
     Expected = [],
     ?assertEqual(Expected, VIPBes).
+
 -endif.
 

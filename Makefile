@@ -56,7 +56,7 @@ stage:
 		./rebar3 release
 
 vct:
-	./rebar3 ct --readable=false
+	./rebar3 at test ct --readable=false
 
 DIALYZER_APPS = kernel stdlib erts sasl eunit syntax_tools compiler crypto
 
