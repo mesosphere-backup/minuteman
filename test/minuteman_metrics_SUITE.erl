@@ -90,6 +90,8 @@ set_interval(test_wait_metrics) ->
 set_interval(_) -> ok.
 
 init_per_testcase(Test, Config) ->
+    PrivateDir = ?config(priv_dir, Config),
+    application:set_env(minuteman, agent_dets_basedir, PrivateDir),
     application:set_env(ip_vs_conn, proc_file, proc_file(Config, Test)),
     case os:cmd("id -u") of
         "0\n" ->
