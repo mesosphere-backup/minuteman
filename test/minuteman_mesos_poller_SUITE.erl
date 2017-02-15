@@ -20,7 +20,7 @@ test_gen_server(_Config) ->
 test_handle_poll_state(Config) ->
     AgentIP = {1, 1, 1, 1},
     DataDir = ?config(data_dir, Config),
-    io:format("DataDir ~p~n", [DataDir]),
+    ok = mnesia:dirty_delete(kv2, [minuteman, vips]),
     {ok, Data} = file:read_file(filename:join(DataDir, "named-base-vips.json")),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     State0 = {state, AgentIP, ordsets:new(), 0},
