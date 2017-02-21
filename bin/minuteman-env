@@ -95,4 +95,4 @@ export ERL_FLAGS="${ERL_FLAGS} -mesos_state ssl ${MESOS_STATE_SSL_ENABLED} \
                                -minuteman api_listen_ip ${MINUTEMAN_DEBUG_API_LISTEN_IP}"
 
 
-NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 ${RELNAME} $@
+NAME=${NAME} RELX_REPLACE_OS_VARS=true ERL_EPMD_PORT=61420 RELX_OUT_FILE_PATH=/tmp ${RELNAME} $@
