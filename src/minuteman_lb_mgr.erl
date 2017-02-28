@@ -46,6 +46,10 @@
 %% State callbacks
 -export([notree/3, no_ips/3, reconcile/3, maintain/3]).
 
+-ifdef(TEST).
+-export([normalize_services_and_dests/1]).
+-endif.
+
 push_vips(VIPs0) ->
     VIPs1 = ordsets:from_list(VIPs0),
     gen_statem:cast(?SERVER, {vips, VIPs1}).
