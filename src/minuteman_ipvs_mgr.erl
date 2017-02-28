@@ -188,7 +188,10 @@ handle_call({remove_dest, Service, Dest}, _From, State) ->
 
 -spec(service_address(service()) -> {protocol(), inet:ip4_address(), inet:port_number()}).
 service_address(Service) ->
-    AF = proplists:get_value(address_family, Service),
+    % proactively added default because centos-7.2 3.10.0-514.6.1.el7.x86_64 kernel is
+    % missing this property for destination addresses
+    Inet = netlink_codec:family_to_int(inet),
+    AF = proplists:get_value(address_family, Service, Inet),
     Protocol = netlink_codec:protocol_to_atom(proplists:get_value(protocol, Service)),
     AddressBin = proplists:get_value(address, Service),
     AddressList = binary:bin_to_list(AddressBin),
@@ -201,7 +204,9 @@ service_address(Service) ->
 
 -spec(destination_address(Destination :: dest()) -> {inet:ip4_address(), inet:port_number()}).
 destination_address(Destination) ->
-    AF = proplists:get_value(address_family, Destination),
+    % centos-7.2 3.10.0-514.6.1.el7.x86_64 kernel is missing this property
+    Inet = netlink_codec:family_to_int(inet),
+    AF = proplists:get_value(address_family, Destination, Inet),
     AddressBin = proplists:get_value(address, Destination),
     AddressList = binary:bin_to_list(AddressBin),
     Port = proplists:get_value(port, Destination),
@@ -363,3 +368,52 @@ ip_to_address2(IP0) ->
     Padding = 8 * (16 - size(IP2)),
     <<IP2/binary, 0:Padding/integer>>.
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+destination_address_test_() ->
+    D = [{address, <<10, 10, 0, 83, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>},
+         {port, 9042},
+         {fwd_method, 0},
+         {weight, 1},
+         {u_threshold, 0},
+         {l_threshold, 0},
+         {active_conns, 0},
+         {inact_conns, 0},
+         {persist_conns, 0},
+         {stats, [{conns, 0},
+                 {inpkts, 0},
+                 {outpkts, 0},
+                 {inbytes, 0},
+                 {outbytes, 0},
+                 {cps, 0},
+                 {inpps, 0},
+                 {outpps, 0},
+                 {inbps, 0},
+                 {outbps, 0}]}],
+    DAddr = {{10, 10, 0, 83}, 9042},
+    [?_assertEqual(DAddr, destination_address(D))].
+
+service_address_test_() ->
+    S = [{address_family, 2},
+         {protocol, 6},
+         {address, <<11, 197, 245, 133, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>},
+         {port, 9042},
+         {sched_name, "wlc"},
+         {flags, 2, 4294967295},
+         {timeout, 0},
+         {netmask, 4294967295},
+         {stats, [{conns, 0},
+                 {inpkts, 0},
+                 {outpkts, 0},
+                 {inbytes, 0},
+                 {outbytes, 0},
+                 {cps, 0},
+                 {inpps, 0},
+                 {outpps, 0},
+                 {inbps, 0},
+                 {outbps, 0}]}],
+    SAddr = {tcp, {11, 197, 245, 133}, 9042},
+    [?_assertEqual(SAddr, service_address(S))].
+
+-endif.
