@@ -14,17 +14,25 @@
 %% API
 -export([start_link/0]).
 
--export([get_dests/2, add_dest/4, remove_dest/3, add_dest/5, remove_dest/5]).
--export([get_services/1, add_service/3, remove_service/2, remove_service/3]).
--export([service_address/1, destination_address/1]).
+-export([get_dests/2,
+         add_dest/4,
+         remove_dest/3,
+         add_dest/6,
+         remove_dest/6]).
+-export([get_services/1,
+         add_service/4,
+         remove_service/2,
+         remove_service/4]).
+-export([service_address/1,
+         destination_address/1]).
 
 %% gen_server callbacks
 -export([init/1,
-    handle_call/3,
-    handle_cast/2,
-    handle_info/2,
-    terminate/2,
-    code_change/3]).
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+         code_change/3]).
 
 -define(SERVER, ?MODULE).
 
@@ -59,6 +67,8 @@
 -define(IP_VS_SVC_F_SCHED2,     16#10).          %% scheduler flag 2 */
 -define(IP_VS_SVC_F_SCHED3,     16#20).          %% scheduler flag 3 */
 
+-define(IPVS_PROTOCOLS, [tcp]). %% protocols to query gen_netlink for
+
 -type service() :: term().
 -type dest() :: term().
 -export_type([service/0, dest/0]).
@@ -71,42 +81,47 @@
 get_services(Pid) ->
     gen_server:call(Pid, get_services).
 
--spec(add_service(Pid :: pid(), IP :: inet:ip4_address(), Port :: inet:port_number()) -> ok).
-add_service(Pid, IP, Port) ->
-    gen_server:call(Pid, {add_service, IP, Port}).
+-spec(add_service(Pid :: pid(), IP :: inet:ip4_address(), Port :: inet:port_number(),
+                  Protocol :: protocol()) -> ok | error).
+add_service(Pid, IP, Port, Protocol) ->
+    gen_server:call(Pid, {add_service, IP, Port, Protocol}).
 
--spec(remove_service(Pid :: pid(), Service :: service()) -> ok).
+-spec(remove_service(Pid :: pid(), Service :: service()) -> ok | error).
 remove_service(Pid, Service) ->
     gen_server:call(Pid, {remove_service, Service}).
 
--spec(remove_service(Pid :: pid(), IP :: inet:ip4_address(), Port :: inet:port_number()) -> ok).
-remove_service(Pid, IP, Port) ->
-    gen_server:call(Pid, {remove_service, IP, Port}).
+-spec(remove_service(Pid :: pid(), IP :: inet:ip4_address(),
+                     Port :: inet:port_number(),
+                     Protocol :: protocol()) -> ok | error).
+remove_service(Pid, IP, Port, Protocol) ->
+    gen_server:call(Pid, {remove_service, IP, Port, Protocol}).
 
 -spec(get_dests(Pid :: pid(), Service :: service()) -> [dest()]).
 get_dests(Pid, Service) ->
     gen_server:call(Pid, {get_dests, Service}).
 
--spec(remove_dest(Pid :: pid(), ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
-    DestIP :: inet:ip4_address(), DestPort :: inet:port_number()) -> ok | error).
-remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort) ->
-    gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort}).
-
--spec(remove_dest(Pid :: pid(), Service :: service(), Dest :: dest()) -> ok | error).
+-spec(remove_dest(Pid :: pid(), Service :: service(),
+                  Dest :: dest()) -> ok | error).
 remove_dest(Pid, Service, Dest) ->
     gen_server:call(Pid, {remove_dest, Service, Dest}).
 
+-spec(remove_dest(Pid :: pid(), ServiceIP :: inet:ip4_address(),
+                  ServicePort :: inet:port_number(),
+                  DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+                  Protocol :: protocol()) -> ok | error).
+remove_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol) ->
+    gen_server:call(Pid, {remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}).
 
--spec(add_dest(Pid :: pid(), Service :: service(), IP :: inet:ip4_address(), Port :: inet:port_number()) -> ok | error).
+-spec(add_dest(Pid :: pid(), Service :: service(), IP :: inet:ip4_address(),
+               Port :: inet:port_number()) -> ok | error).
 add_dest(Pid, Service, IP, Port) ->
     gen_server:call(Pid, {add_dest, Service, IP, Port}).
 
-
 -spec(add_dest(Pid :: pid(), ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
-    DestIP :: inet:ip4_address(), DestPort :: inet:port_number()) -> ok | error).
-add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort) ->
-    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort}).
-
+               DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+               Protocol :: protocol()) -> ok | error).
+add_dest(Pid, ServiceIP, ServicePort, DestIP, DestPort, Protocol) ->
+    gen_server:call(Pid, {add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -161,14 +176,14 @@ init([]) ->
 handle_call(get_services, _From, State) ->
     Reply = handle_get_services(State),
     {reply, Reply, State};
-handle_call({add_service, IP, Port}, _From, State) ->
-    Reply = handle_add_service(IP, Port, State),
+handle_call({add_service, IP, Port, Protocol}, _From, State) ->
+    Reply = handle_add_service(IP, Port, Protocol, State),
     {reply, Reply, State};
 handle_call({remove_service, Service}, _From, State) ->
     Reply = handle_remove_service(Service, State),
     {reply, Reply, State};
-handle_call({remove_service, IP, Port}, _From, State) ->
-    Reply = handle_remove_service(IP, Port, State),
+handle_call({remove_service, IP, Port, Protocol}, _From, State) ->
+    Reply = handle_remove_service(IP, Port, Protocol, State),
     {reply, Reply, State};
 handle_call({get_dests, Service}, _From, State) ->
     Reply = handle_get_dests(Service, State),
@@ -176,14 +191,14 @@ handle_call({get_dests, Service}, _From, State) ->
 handle_call({add_dest, Service, IP, Port}, _From, State) ->
     Reply = handle_add_dest(Service, IP, Port, State),
     {reply, Reply, State};
-handle_call({add_dest, ServiceIP, ServicePort, DestIP, DestPort}, _From, State) ->
-    Reply = handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, State),
-    {reply, Reply, State};
-handle_call({remove_dest, ServiceIP, ServicePort, DestIP, DestPort}, _From, State) ->
-    Reply = handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, State),
+handle_call({add_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}, _From, State) ->
+    Reply = handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State),
     {reply, Reply, State};
 handle_call({remove_dest, Service, Dest}, _From, State) ->
     Reply = handle_remove_dest(Service, Dest, State),
+    {reply, Reply, State};
+handle_call({remove_dest, ServiceIP, ServicePort, DestIP, DestPort, Protocol}, _From, State) ->
+    Reply = handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State),
     {reply, Reply, State}.
 
 -spec(service_address(service()) -> {protocol(), inet:ip4_address(), inet:port_number()}).
@@ -280,35 +295,55 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-handle_get_services(#state{netlink_generic = Pid, family = Family}) ->
-    AF = netlink_codec:family_to_int(inet),
-    Protocol = netlink_codec:protocol_to_int(tcp),
+
+-spec(handle_get_services(State :: state()) -> [service()]).
+handle_get_services(State) ->
+    lists:foldl(
+      fun(Protocol, Acc) ->
+              Services = handle_get_services(inet, Protocol, State),
+              Acc ++ Services
+      end, [], ?IPVS_PROTOCOLS).
+
+-spec(handle_get_services(AddressFamily :: family(), Protocol :: protocol(),
+                          State :: state()) -> [service()]).
+handle_get_services(AddressFamily, Protocol, #state{netlink_generic = Pid, family = Family}) ->
+    AddressFamily1 = netlink_codec:family_to_int(AddressFamily),
+    Protocol1 = netlink_codec:protocol_to_int(Protocol),
     Message =
-        #get_service{request = [
-            {service, [
-                {address_family, AF},
-                {protocol, Protocol}
-            ]}
-        ]},
+        #get_service{
+           request =
+               [{service,
+                 [{address_family, AddressFamily1},
+                  {protocol, Protocol1}
+                 ]}
+               ]},
     {ok, Replies} = gen_netlink_client:request(Pid, Family, ipvs, [root, match], Message),
-    [proplists:get_value(service, MaybeService) || #netlink{msg = #new_service{request = MaybeService}} <- Replies,
+    [proplists:get_value(service, MaybeService)
+     || #netlink{msg = #new_service{request = MaybeService}}
+            <- Replies,
         proplists:is_defined(service, MaybeService)].
 
-handle_remove_service(IP, Port, State) ->
-    Protocol = netlink_codec:protocol_to_int(tcp),
-    Service = ip_to_address(IP) ++ [{port, Port}, {protocol, Protocol}],
+-spec(handle_remove_service(IP :: inet:ip4_address(), Port :: inet:port_number(),
+                            Protocol :: protocol(),
+                            State :: state()) -> ok | error).
+handle_remove_service(IP, Port, Protocol, State) ->
+    Protocol1 = netlink_codec:protocol_to_int(Protocol),
+    Service = ip_to_address(IP) ++ [{port, Port}, {protocol, Protocol1}],
     handle_remove_service(Service, State).
 
+-spec(handle_remove_service(Service :: service(), State :: state()) -> ok | error).
 handle_remove_service(Service, #state{netlink_generic = Pid, family = Family}) ->
     case gen_netlink_client:request(Pid, Family, ipvs, [], #del_service{request = [{service, Service}]}) of
         {ok, _} -> ok;
         _ -> error
     end.
 
-handle_add_service(IP, Port, #state{netlink_generic = Pid, family = Family}) ->
+-spec(handle_add_service(IP :: inet:ip4_address(), Port :: inet:port_number(),
+                         Protocol :: protocol(), State :: state()) -> ok | error).
+handle_add_service(IP, Port, Protocol, #state{netlink_generic = Pid, family = Family}) ->
     Flags = 0,
     Service0 = [
-        {protocol, netlink_codec:protocol_to_int(tcp)},
+        {protocol, netlink_codec:protocol_to_int(Protocol)},
         {port, Port},
         {sched_name, "wlc"},
         {netmask, 16#ffffffff},
@@ -322,17 +357,23 @@ handle_add_service(IP, Port, #state{netlink_generic = Pid, family = Family}) ->
         _ -> error
     end.
 
+-spec(handle_get_dests(Service :: service(), State :: state()) -> [dest()]).
 handle_get_dests(Service, #state{netlink_generic = Pid, family = Family}) ->
     Message = #get_dest{request = [{service, Service}]},
     {ok, Replies} = gen_netlink_client:request(Pid, Family, ipvs, [root, match], Message),
     [proplists:get_value(dest, MaybeDest) || #netlink{msg = #new_dest{request = MaybeDest}} <- Replies,
         proplists:is_defined(dest, MaybeDest)].
 
-handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, State) ->
-    Protocol = netlink_codec:protocol_to_int(tcp),
-    Service = ip_to_address(ServiceIP) ++ [{port, ServicePort}, {protocol, Protocol}],
+-spec(handle_add_dest(ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
+                      DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+                      Protocol :: protocol(), State :: state()) -> ok | error).
+handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State) ->
+    Protocol1 = netlink_codec:protocol_to_int(Protocol),
+    Service = ip_to_address(ServiceIP) ++ [{port, ServicePort}, {protocol, Protocol1}],
     handle_add_dest(Service, DestIP, DestPort, State).
 
+-spec(handle_add_dest(Service :: service(), IP :: inet:ip4_address(),
+                      Port :: inet:port_number(), State :: state()) -> ok | error).
 handle_add_dest(Service, IP, Port, #state{netlink_generic = Pid, family = Family}) ->
     Base = [{fwd_method, ?IP_VS_CONN_F_MASQ}, {weight, 1}, {u_threshold, 0}, {l_threshold, 0}],
     Dest = [{port, Port}] ++ Base ++ ip_to_address(IP),
@@ -343,12 +384,16 @@ handle_add_dest(Service, IP, Port, #state{netlink_generic = Pid, family = Family
         _ -> error
     end.
 
-handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, State) ->
-    Protocol = netlink_codec:protocol_to_int(tcp),
-    Service = ip_to_address(ServiceIP) ++ [{port, ServicePort}, {protocol, Protocol}],
+-spec(handle_remove_dest(ServiceIP :: inet:ip4_address(), ServicePort :: inet:port_number(),
+                         DestIP :: inet:ip4_address(), DestPort :: inet:port_number(),
+                         Protocol :: protocol(), State :: state()) -> ok | error).
+handle_remove_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State) ->
+    Protocol1 = netlink_codec:protocol_to_int(Protocol),
+    Service = ip_to_address(ServiceIP) ++ [{port, ServicePort}, {protocol, Protocol1}],
     Dest = ip_to_address(DestIP) ++ [{port, DestPort}],
     handle_remove_dest(Service, Dest, State).
 
+-spec(handle_remove_dest(Service :: service(), Dest :: dest(), State :: state()) -> ok | error).
 handle_remove_dest(Service, Dest, #state{netlink_generic = Pid, family = Family}) ->
     lager:info("Deleting Dest: ~p~n", [Dest]),
     Msg = #del_dest{request = [{dest, Dest}, {service, Service}]},
