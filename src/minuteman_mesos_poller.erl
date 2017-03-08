@@ -293,9 +293,9 @@ generate_ops(AgentBEIPs, FlatAgentVIPs, LashupVIPs) ->
         fun(#vip_be{backend_ip = BEIP}) -> ordsets:is_element(BEIP, AgentBEIPs) end, FlatLashupVIPs),
     FlatVIPsToDel = ordsets:subtract(FlatLashupVIPsFromThisAgent, FlatAgentVIPs),
     AddOps = lists:foldl(fun flat_vip_add_fold/2, [], FlatVIPsToAdd),
-    DelOps = lists:foldl(fun flat_vip_del_fold/2, [], FlatVIPsToDel),
-    add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, DelOps),
-    {lists:reverse(AddOps), lists:reverse(DelOps)}.
+    DelOps0 = lists:foldl(fun flat_vip_del_fold/2, [], FlatVIPsToDel),
+    DelOps1 = add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, DelOps0),
+    {lists:reverse(AddOps), lists:reverse(DelOps1)}.
 
 add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, Ops0) ->
     ExistingProtocolVIPs = lists:map(fun to_protocol_vip/1, FlatLashupVIPs),
