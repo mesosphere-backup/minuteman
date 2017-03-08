@@ -150,25 +150,29 @@ apply_diff({ServicesToAdd, ServicesToRemove, ServicesToModify}, State) ->
     lists:foreach(fun({VIP, BEs}) -> add_service(VIP, BEs, State) end, ServicesToAdd),
     lists:foreach(fun({VIP, BEAdd, BERemove}) -> modify_service(VIP, BEAdd, BERemove, State) end, ServicesToModify).
 
-modify_service({_Protocol, IP, Port}, BEAdd, BERemove, #state{ipvs_mgr = IPVSMgr}) ->
+modify_service({Protocol, IP, Port}, BEAdd, BERemove, #state{ipvs_mgr = IPVSMgr}) ->
     lists:foreach(
         fun({BEIP, BEPort}) ->
-            minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort)
+                minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol)
         end,
         BEAdd),
     lists:foreach(
         fun({BEIP, BEPort}) ->
-            minuteman_ipvs_mgr:remove_dest(IPVSMgr, IP, Port, BEIP, BEPort)
+                minuteman_ipvs_mgr:remove_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol)
         end,
         BERemove).
 
 
-remove_service({_Protocol, IP, Port}, #state{ipvs_mgr = IPVSMgr}) ->
-    minuteman_ipvs_mgr:remove_service(IPVSMgr, IP, Port).
+remove_service({Protocol, IP, Port}, #state{ipvs_mgr = IPVSMgr}) ->
+    minuteman_ipvs_mgr:remove_service(IPVSMgr, IP, Port, Protocol).
 
-add_service({_Protocol, IP, Port}, BEs, #state{ipvs_mgr = IPVSMgr}) ->
-    minuteman_ipvs_mgr:add_service(IPVSMgr, IP, Port),
-    lists:foreach(fun({BEIP, BEPort}) -> minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort) end, BEs).
+add_service({Protocol, IP, Port}, BEs, #state{ipvs_mgr = IPVSMgr}) ->
+    minuteman_ipvs_mgr:add_service(IPVSMgr, IP, Port, Protocol),
+    lists:foreach(
+      fun({BEIP, BEPort}) ->
+              minuteman_ipvs_mgr:add_dest(IPVSMgr, IP, Port, BEIP, BEPort, Protocol)
+      end,
+      BEs).
 
 process_reachability(VIPs0, State) ->
     lists:map(fun({VIP, BEs0}) -> {VIP, reachable_backends(BEs0, State)} end, VIPs0).
