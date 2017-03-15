@@ -16,7 +16,6 @@
   networking/0,
   agent_polling_enabled/0,
   agent_port/0,
-  agent_dets_path/1,
   min_named_ip/0,
   max_named_ip/0,
   minuteman_iface/0,
@@ -44,12 +43,6 @@ agent_polling_enabled() ->
 
 agent_port() ->
   application:get_env(minuteman, agent_port, 5051).
-
-agent_dets_basedir() ->
-  application:get_env(minuteman, agent_dets_basedir, "/var/lib/dcos/navstar/minuteman/dets").
-
-agent_dets_path(DetsName) ->
-  filename:join([agent_dets_basedir(), DetsName]).
 
 -spec(min_named_ip() -> inet:ip4_address()).
 min_named_ip() ->

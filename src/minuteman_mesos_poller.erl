@@ -39,7 +39,6 @@
 
 -record(state, {
     agent_ip = erlang:error() :: inet:ip4_address(),
-    backend_ips = ordsets:new() :: [inet:ip4_address()],
     last_poll_time = undefined :: integer() | undefined
 }).
 
@@ -52,7 +51,18 @@
     backend_ip = erlang:error() :: inet:ip4_address(),
     backend_port = erlang:error() :: inet:port_number()
 }).
+
+-record(vip_be2, {
+    protocol = erlang:error() :: tcp,
+    vip_ip = erlang:error() :: inet:ip4_address(),
+    vip_port = erlang:error() :: inet:port_number(),
+    agent_ip = erlang:error() :: inet:ip4_address(),
+    backend_ip = erlang:error() :: inet:ip4_address(),
+    backend_port = erlang:error() :: inet:port_number()
+}).
+
 -type vip_be() :: #vip_be{}.
+-type vip_be2() :: #vip_be2{}.
 
 -type protocol_vip() :: {protocol(), Host :: inet:ip4_address() | string(), inet:port_number()}.
 -type protocol_vip_orswot() :: {protocol_vip(), riak_dt_orswot}.
@@ -95,8 +105,7 @@ init([]) ->
     PollInterval = minuteman_config:agent_poll_interval(),
     timer:send_after(PollInterval, poll),
     AgentIP = mesos_state:ip(),
-    BEIPs = init_be(AgentIP),
-    {ok, #state{agent_ip = AgentIP, backend_ips = BEIPs}}.
+    {ok, #state{agent_ip = AgentIP}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -186,17 +195,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-agent_be() ->
-    minuteman_config:agent_dets_path("agent_be").
-
--spec(init_be(AgentIP ::inet:ip4_address()) -> [inet:ip4_address()]).
-init_be(AgentIP) ->
-    {ok, Name} = dets:open_file(agent_be(), []),
-    case dets:lookup(Name, AgentIP) of
-        [{AgentIP, BEIPs}] -> BEIPs;
-                _ -> ordsets:new()
-    end.
-
 maybe_poll(State) ->
     case minuteman_config:agent_polling_enabled() of
         true ->
@@ -225,59 +223,42 @@ handle_poll_failure(State = #state{last_poll_time = LastPollTime}) ->
     handle_poll_failure(TimeSinceLastPoll, State).
 
 handle_poll_failure(TimeSinceLastPoll, State) when TimeSinceLastPoll > ?AGENT_TIMEOUT_SECS ->
-    handle_poll_changes([], State);
+    handle_poll_changes([], State#state.agent_ip),
+    State;
 handle_poll_failure(_TimeSinceLastPoll, State) ->
     State.
 
 -spec(handle_poll_state(mesos_state_client:mesos_agent_state(), state()) -> state()).
-handle_poll_state(MesosState, State0) ->
-    VIPBEs = collect_vips(MesosState, State0),
-    FlatVIPBEs = flatten_vips(VIPBEs),
-    State1 = handle_poll_changes(FlatVIPBEs, State0),
-    State1#state{last_poll_time = erlang:monotonic_time()}.
+handle_poll_state(MesosState, State) ->
+    VIPBEs = collect_vips(MesosState, State),
+    handle_poll_changes(VIPBEs, State#state.agent_ip),
+    State#state{last_poll_time = erlang:monotonic_time()}.
 
--spec(handle_poll_changes([vip_be()], state()) -> state()).
-handle_poll_changes(FlatVIPBEs, State) ->
-    AgentIP = State#state.agent_ip,
-    AgentBEs = State#state.backend_ips,
-    NewBEs = extract_bes(FlatVIPBEs),
+-spec(handle_poll_changes([vip_be()], inet:ip4_address()) -> ok | {ok, _}).
+handle_poll_changes(VIPBEs, AgentIP) ->
     LashupVIPs = lashup_kv:value(?VIPS_KEY),
-    {AddOps, DelOps} = generate_ops(AgentBEs, FlatVIPBEs, LashupVIPs),
-    maybe_perform_update(AddOps, DelOps, NewBEs, AgentBEs, AgentIP),
-    State#state{backend_ips = NewBEs}.
+    Ops = generate_ops(AgentIP, VIPBEs, LashupVIPs),
+    maybe_perform_update(Ops).
 
-%% For data consistency, data in dets should always
-%% be a super set of data in lashup. Therefore,
+%% For data consistency, data in new key should always
+%% be a super set of data in old key. Therefore,
 %% the order of updates is important.
 
-maybe_perform_update(AddOps, DelOps, NewBEs, OldBEs, AgentIP) ->
-    %% first delete from lashup
-    maybe_perform_ops(DelOps),
-    %% update dets
-    maybe_update_bes(NewBEs, OldBEs, AgentIP),
-    %% then add to lashup
-    maybe_perform_ops(AddOps).
+maybe_perform_update({AddOps, DelOps, AddOps2, DelOps2}) ->
+    %% first delete from old key
+    maybe_perform_ops(?VIPS_KEY, DelOps),
+    %% second delete from new key
+    maybe_perform_ops(?VIPS_KEY2, DelOps2),
+    %% third add to new key
+    maybe_perform_ops(?VIPS_KEY2, AddOps2),
+    %% last add to old key
+    maybe_perform_ops(?VIPS_KEY, AddOps).
 
-maybe_perform_ops([]) ->
+maybe_perform_ops(_, []) ->
     ok;
-maybe_perform_ops(Ops) ->
-    lager:debug("Performing Ops: ~p", [Ops]),
-    {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, Ops}).
-
--spec(maybe_update_bes(ordsets:ordset(inet:ip4_address()), ordsets:ordset(inet:ip4_address()),
-    inet:ip4_address()) -> ok).
-maybe_update_bes(NewBEs, OldBEs, AgentIP) ->
-    case NewBEs == OldBEs of
-        false ->
-            ok = dets:insert(agent_be(), {AgentIP, NewBEs}),
-            ok = dets:sync(agent_be());
-        true -> ok
-    end.
-
--spec(extract_bes([vip_be()]) -> [inet:ip4_address()]).
-extract_bes(FlatVIPBEs) ->
-    NewBEs = [BE || #vip_be{backend_ip = BE} <- FlatVIPBEs],
-    ordsets:from_list(NewBEs).
+maybe_perform_ops(Key, Ops) ->
+    lager:debug("Performing Key: ~p, Ops: ~p", [Key, Ops]),
+    {ok, _} = lashup_kv:request_op(Key, {update, Ops}).
 
 %% Generate ops generates ops in a specific order:
 %% 1. Add local backends
@@ -286,16 +267,52 @@ extract_bes(FlatVIPBEs) ->
 %% For this reason we have to reverse the ops before applying them
 %% Since the way that it generates this results in this list being reversed
 
-generate_ops(AgentBEIPs, FlatAgentVIPs, LashupVIPs) ->
+generate_ops(AgentIP, AgentVIPs, LashupVIPs) ->
+    FlatAgentVIPs = flatten_vips(AgentVIPs),
     FlatLashupVIPs = flatten_vips(LashupVIPs),
     FlatVIPsToAdd = ordsets:subtract(FlatAgentVIPs, FlatLashupVIPs),
-    FlatLashupVIPsFromThisAgent = lists:filter(
-        fun(#vip_be{backend_ip = BEIP}) -> ordsets:is_element(BEIP, AgentBEIPs) end, FlatLashupVIPs),
+    FlatLashupVIPsFromThisAgent = fetch_vips_from_agent(AgentIP),
     FlatVIPsToDel = ordsets:subtract(FlatLashupVIPsFromThisAgent, FlatAgentVIPs),
+    {AddOps, DelOps} = generate_add_del_ops(FlatVIPsToAdd, FlatVIPsToDel, FlatLashupVIPs),
+    {AddOps2, DelOps2} = generate_add_del_ops2(AgentIP, FlatVIPsToAdd, FlatVIPsToDel, FlatLashupVIPs),
+    {AddOps, DelOps, AddOps2, DelOps2}.
+
+fetch_vips_from_agent(AgentIP) ->
+    LashupVIPs2 = lashup_kv:value(?VIPS_KEY2),
+    FlatLashupVIPs2 = flatten_vips2(LashupVIPs2),
+    FlatLashupVIPsFromThisAgent2 = filter_vips_from_agent(AgentIP, FlatLashupVIPs2),
+    vipbe2_to_vipbe(FlatLashupVIPsFromThisAgent2).
+
+filter_vips_from_agent(AgentIP, FlatVIPs) ->
+    lists:filter(fun(#vip_be2{agent_ip = AIP}) -> AIP == AgentIP end, FlatVIPs).
+
+generate_add_del_ops(FlatVIPsToAdd, FlatVIPsToDel, FlatLashupVIPs) ->
     AddOps = lists:foldl(fun flat_vip_add_fold/2, [], FlatVIPsToAdd),
     DelOps0 = lists:foldl(fun flat_vip_del_fold/2, [], FlatVIPsToDel),
     DelOps1 = add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, DelOps0),
     {lists:reverse(AddOps), lists:reverse(DelOps1)}.
+
+generate_add_del_ops2(AgentIP, FlatVIPsToAdd, FlatVIPsToDel, FlatLashupVIPs) ->
+    FlatVIPsToAdd2 = vipbe_to_vipbe2(AgentIP, FlatVIPsToAdd),
+    FlatVIPsToDel2 = vipbe_to_vipbe2(AgentIP, FlatVIPsToDel),
+    AddOps = lists:foldl(fun flat_vip2_add_fold/2, [], FlatVIPsToAdd2),
+    DelOps0 = lists:foldl(fun flat_vip2_del_fold/2, [], FlatVIPsToDel2),
+    DelOps1 = add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, DelOps0),
+    {lists:reverse(AddOps), lists:reverse(DelOps1)}.
+
+-spec(vipbe2_to_vipbe([vip_be2()]) -> [vip_be()]).
+vipbe2_to_vipbe(FlatVIPs2) ->
+    [#vip_be{protocol = Proto, vip_ip = VIP, vip_port = Port,
+             backend_ip = BE, backend_port = BPort} ||
+        #vip_be2{protocol = Proto, vip_ip = VIP, vip_port = Port,
+                 backend_ip = BE, backend_port = BPort} <- FlatVIPs2].
+
+-spec(vipbe_to_vipbe2(inet:ip4_address(), [vip_be()]) -> [vip_be2()]).
+vipbe_to_vipbe2(AgentIP,  FlatVIPs) ->
+    [#vip_be2{protocol = Proto, vip_ip = VIP, vip_port = Port,
+              agent_ip = AgentIP, backend_ip = BE, backend_port = BPort} ||
+        #vip_be{protocol = Proto, vip_ip = VIP, vip_port = Port,
+                backend_ip = BE, backend_port = BPort} <- FlatVIPs].
 
 add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, Ops0) ->
     ExistingProtocolVIPs = lists:map(fun to_protocol_vip/1, FlatLashupVIPs),
@@ -314,13 +331,27 @@ flat_vip_add_fold(VIPBE = #vip_be{backend_ip = BEIP, backend_port = BEPort}, Acc
     Op = {update, Field, {add, {BEIP, BEPort}}},
     [Op | Acc].
 
+flat_vip2_add_fold(VIPBE = #vip_be2{agent_ip = AgentIP, backend_ip = BEIP, backend_port = BEPort}, Acc) ->
+    Field = {to_protocol_vip2(VIPBE), riak_dt_orswot},
+    Op = {update, Field, {add, {AgentIP, {BEIP, BEPort}}}},
+    [Op | Acc].
+
 flat_vip_del_fold(VIPBE = #vip_be{backend_ip = BEIP, backend_port = BEPort}, Acc) ->
     Field = {to_protocol_vip(VIPBE), riak_dt_orswot},
     Op = {update, Field, {remove, {BEIP, BEPort}}},
     [Op | Acc].
 
+flat_vip2_del_fold(VIPBE = #vip_be2{agent_ip = AgentIP, backend_ip = BEIP, backend_port = BEPort}, Acc) ->
+    Field = {to_protocol_vip2(VIPBE), riak_dt_orswot},
+    Op = {update, Field, {remove, {AgentIP, {BEIP, BEPort}}}},
+    [Op | Acc].
+
 -spec(to_protocol_vip(vip_be()) -> protocol_vip()).
 to_protocol_vip(#vip_be{vip_ip = VIPIP, protocol = Protocol, vip_port = VIPPort}) ->
+    {Protocol, VIPIP, VIPPort}.
+
+-spec(to_protocol_vip2(vip_be2()) -> protocol_vip()).
+to_protocol_vip2(#vip_be2{vip_ip = VIPIP, protocol = Protocol, vip_port = VIPPort}) ->
     {Protocol, VIPIP, VIPPort}.
 
 -spec(flatten_vips([{VIP :: protocol_vip() | protocol_vip_orswot(), [Backend :: ip_port()]}]) -> [vip_be()]).
@@ -338,6 +369,23 @@ flatten_vips(VIPDict) ->
             VIPDict
         ),
     ordsets:from_list(VIPBEs).
+
+-spec(flatten_vips2([{VIP :: protocol_vip() | protocol_vip_orswot(), [Backend :: ip_ip_port()]}]) -> [vip_be2()]).
+flatten_vips2(VIPDict) ->
+    VIPBEs =
+        lists:flatmap(
+            fun
+                ({{{Protocol, VIPIP, VIPPort}, riak_dt_orswot}, Backends}) ->
+                    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = BEPort,
+                        backend_ip =  BEIP, agent_ip = AgentIP} || {AgentIP, {BEIP, BEPort}} <- Backends];
+                ({{Protocol, VIPIP, VIPPort}, Backends}) ->
+                    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = BEPort,
+                        backend_ip =  BEIP, agent_ip = AgentIP} || {AgentIP, {BEIP, BEPort}} <- Backends]
+            end,
+            VIPDict
+        ),
+    ordsets:from_list(VIPBEs).
+
 -spec(unflatten_vips([vip_be()]) -> [{VIP :: protocol_vip(), [Backend :: ip_port()]}]).
 unflatten_vips(VIPBes) ->
     VIPBEsDict =
@@ -678,5 +726,32 @@ missing_port_test() ->
     Expected = [],
     ?assertEqual(Expected, VIPBes).
 
+filter_vips_test() ->
+    AgentIP = {1, 1, 1, 1},
+    FakeAgentIP = {1, 1, 1, 2},
+    VIP1 = {2, 2, 2, 2},
+    VIP2 = {2, 2, 2, 3},
+    FlatVIPs = [#vip_be2{vip_ip = VIP1, agent_ip = AgentIP, protocol = tcp,
+                         vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049},
+                #vip_be2{vip_ip = VIP2, agent_ip = FakeAgentIP, protocol = tcp,
+                         vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
+   FilterVIPs = filter_vips_from_agent(AgentIP, FlatVIPs),
+   Expected = [#vip_be2{vip_ip = VIP1, agent_ip = AgentIP, protocol = tcp,
+                         vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
+   ?assertEqual(Expected, FilterVIPs).
+
+flatten_vips_test() ->
+   VIPDict = [
+        {
+            {tcp, {2, 2, 2, 2}, 5000},
+            [
+                {{1, 1, 1, 1}, {{10, 0, 0, 243}, 12049}}
+            ]
+        }
+    ],
+    FlatVIPs = flatten_vips2(VIPDict),
+    Expected = [#vip_be2{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
+                         agent_ip = {1, 1, 1, 1}, backend_port = 12049, backend_ip = {10, 0, 0, 243}}],
+    ?assertEqual(Expected, FlatVIPs).
 -endif.
 
