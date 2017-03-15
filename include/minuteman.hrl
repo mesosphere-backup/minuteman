@@ -13,6 +13,7 @@
   list_to_atom(lists:flatten([?MODULE_STRING, "_", integer_to_list(Num)]))).
 
 -type ip_port() :: {inet:ip4_address(), inet:port_number()}.
+-type ip_ip_port() :: {inet:ip4_address(), inet:ip4_address(), inet:port_number()}.
 
 
 %-define(LOG(Formatting, Args), lager:debug(Formatting, Args)).
@@ -23,3 +24,4 @@
 
 
 -define(VIPS_KEY, [minuteman, vips]).
+-define(VIPS_KEY2, [minuteman, vips2]).

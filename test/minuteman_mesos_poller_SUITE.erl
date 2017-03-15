@@ -23,14 +23,12 @@ test_handle_poll_state(Config) ->
     %%ok = mnesia:dirty_delete(kv2, [minuteman, vips]),
     {ok, Data} = file:read_file(filename:join(DataDir, "named-base-vips.json")),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
-    State0 = {state, AgentIP, ordsets:new(), 0},
-    State1 = minuteman_mesos_poller:handle_poll_state(MesosState, State0),
+    State = {state, AgentIP, 0},
+    minuteman_mesos_poller:handle_poll_state(MesosState, State),
     LashupValue = lashup_kv:value([minuteman, vips]),
     [{_, [{{10, 0, 0, 243}, 12049}]}] = LashupValue,
-    {ok, Name} = dets:open_file(minuteman_config:agent_dets_path("agent_be"), []),
-    DetsValue = dets:lookup(Name, AgentIP),
-    [{AgentIP, [{10, 0, 0, 243}]}] = DetsValue,
-    {state, AgentIP, [{10, 0, 0, 243}], _} = State1.
+    LashupValue2 = lashup_kv:value([minuteman, vips2]),
+    [{_, [{{1, 1, 1, 1}, {{10, 0, 0, 243}, 12049}}]}] = LashupValue2.
 
 init_per_suite(Config) ->
   os:cmd("rm -rf Mnesia.nonode@nohost/*"),
@@ -38,8 +36,6 @@ init_per_suite(Config) ->
   Config.
 
 init_per_testcase(_, Config) ->
-  PrivateDir = ?config(priv_dir, Config),
-  application:set_env(minuteman, agent_dets_basedir, PrivateDir),
   application:set_env(minuteman, enable_networking, false),
   {ok, _} = application:ensure_all_started(minuteman),
   Config.

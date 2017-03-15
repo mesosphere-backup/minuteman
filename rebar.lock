@@ -48,7 +48,7 @@
   1},
  {<<"ip_vs_conn">>,
   {git,"https://github.com/mesosphere/ip_vs_conn",
-       {ref,"f083a57832bf202de56f9cb1a9606739e16c3b1b"}},
+       {ref,"72eedf7606b3c2a5830af716c3c02b7d7e17e91c"}},
   0},
  {<<"jsx">>,
   {git,"https://github.com/talentdeficit/jsx.git",
