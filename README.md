@@ -20,9 +20,30 @@ When you launch a set of tasks with these labels, we distribute them to all of t
 #### Caveats
 1. You musn't firewall traffic between the nodes
 2. You musn't change `ip_local_port_range`
-3. You must have the `ipset` package installed
-4. You must run a stock kernel from RHEL 7.2+, or Ubuntu 14.04+ LTS
-
+3. You must run a stock kernel from RHEL 7.2+, or Ubuntu 14.04+ LTS
+4. Requires the following kernel modules: `ip_vs`, `ip_vs_wlc`, `dummy`
+```
+modprobe ip_vs_wlc
+modprobe dummy
+```
+5. Requires dummy `minuteman` device
+```
+ip link add minuteman type dummy
+ip link set minuteman up
+```
+6. Requires iptable rule to masquarade connections to VIPs
+```
+RULE="POSTROUTING -m ipvs --ipvs --vdir ORIGINAL --vmethod MASQ -m comment --comment Minuteman-IPVS-IPTables-masquerade-rule -j MASQUERADE"
+iptables --wait -t nat -I ${RULE}
+```
+7. To support intra-namespace bridge VIPs, bridge netfilter needs to be disabled
+```
+sudo sh -c 'echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables'
+```
+8. IPVS conntrack needs to be enabled
+```
+sudo sysctl net.ipv4.vs.conntrack=1
+```
 #### Persistent Connections
 It is recommended when you use our VIPs you keep long-running, persistent connections. The reason behind this is that you can very quickly fill up the TCP socket table if you do not. The default local port range on Linux allows source connections from 32768 to 61000. This allows 28232 connections to be established between a given source IP and a destinaton address, port pair. TCP connections must go through the time wait state prior to being reclaimed. The Linux kernel's default TCP time wait period is 120 seconds. Given this, you would exhaust the connection table by only making 235 new connections / sec.
 
@@ -82,43 +103,17 @@ This will run an HAProxy on the public slave, on port 80. If you'd like, you can
 ### IP Overlay
 If the VIP address that's specified is used elsewhere in the network is can prove problematic. Although the VIP is a 3-tuple, it is best to ensure that the IP dedicated to the VIP is only in use by the load balancing software and isn't in use at all in your network. Therefore, you should choose IPs from the RFC1918 range.
 
-### IPSet
-You must have the command ipset installed. If you do not, you may see an error like:
-
-```
-15:15:59.731 [error] Unknown response: {ok,"iptables v1.4.21: Set minuteman doesn't exist.\n\nTry `iptables -h' or 'iptables --help' for more information.\n"}
-```
 ### Ports
 The port 61420 must be open for the load balancer to work correctly. Because the load balancer maintains a partial mesh, it needs to ensure that connectivity between nodes is unhindered.
-
-### Connection table exhaustion
-If you begin to see the behaviour as described earlier where the connection table is being exhausted, you'll see various errors in the logs. You can set two sysctls to alleviate this issue, but it doesn't come without caveats.
-
-1. `net.netfilter.nf_conntrack_tcp_timeout_time_wait=0` -- You can set this to 0, but the time_wait state may break connection tracking for other applications
-1. `net.ipv4.tcp_tw_reuse=1` -- This sysctl can be dangerous and break firewalls, as well as NAT implementations. Although, if the firewall properly implements tracking TCP timestamps, it'll be okay. *Do not* set the `net.ipv4.tcp_tw_recycle` sysctl as it is RFC non-compliant and will break firewall connection tracking.
-
-More information about these sysctls can be found here: `https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt`.
 
 ## Implementation
 The local process polls the master node roughly every 5 seconds. The master node caches this for 5 seconds as well, bounding the propagation time for an update to roughly 11 seconds. Although this is the case for new VIPs, it is not the case for failed nodes.
 
 ### Data plane
-The load balancer dataplane primarily utilizes Netfilter. The load balancer installs 4 IPTables rules to enable this, therefore the load balancer must start after firewalld, or any other destructive IPTables management system. These 4 rules tell IPTables to put the packets that match them on an NFQueue. NFQueue is a kernel subsystem that allows userspace to process network traffic.
-
-The rules are two types - the first type is to intercept the traffic, and the second is to drop it. The purpose of the latter rule is to provide an immediate connection reset to the client. The prior set of rules matches based on the combination of a TCP packet, the SYN flag (and none else), and an IPSet match which is populated with the list of VIPs.
-
-Once the packet is on the nfqueue, we calculate the backend that the connection should be mapped to. We use this information to program in an in-kernel conntrack entry which maps (port DNATs) the 5-tuple from the original destination (the VIP) to the new destination (the backend). In some cases where hairpin load balancing occurs, SNAT may be required as well.
-
-Once the NAT programming is done, the packet is released back into the kernel. Since our rules are in the raw chain the packet doesn't yet have a conntrack entry associated with it. The conntrack subsystem recognizes the connection based on the prior program and continues to handle the rest of the flow independently from the load balancer.
+The load balancer dataplane primarily utilizes IPVS.
 
 ### Load balancing algorithm
-The load balancing algorithm is adapted from *The Power of Two Choices in Randomized Load Balancing* (IEEE Trans. Parallel Distrib. Syst. 12, Michael Mitzenmacher). We switch between this algorithm in the raw sense, and a more probabilistic algorithm depending on whether or not more than 10 backends exist for a given VIP. The simple vs. probabilistic algorithm utilization is exposed in the metrics information.
-
-The simple algorithm maintains an EWMA of latencies for a given backend at connection time. It also maintains a set of consecutive failures, and when they happened. If a backend observes enough consecutive failures in a short period of time (<5m) it is considered to be unavailable. A failure is classified as three way handshake failing to occur.
-
-The primary way the algorithm works is that it iterates over the backends and finds those that we assume are available after taking the the historical failures as well as the group failure detector. It then takes two random nodes from the most available bucket.
-
-The probabilistic failure detector randomly chooses backends and checks whether or not the group failure detector considers the agent to be alive. It will continue to do this until it either finds 2 backends that are in the ideal bucket, or until 20 lookups happen. If the prior case happens, it'll choose one at random. If the latter case happens it'll choose one of the 20 at random.
+The load balancing algorithm used is IPVS Weighted Least Connection algorithm.  Currently all the backends have a weight of 1.
 
 ### Failure detection
 The load balancer includes a state of the art failure detection scheme. This failure detection scheme takes some of the work done in the [Hyparview](http://asc.di.fct.unl.pt/~jleitao/pdf/dsn07-leitao.pdf) work. The failure detector maintains a fully connected sparse graph of connections amongst the nodes in the cluster.
