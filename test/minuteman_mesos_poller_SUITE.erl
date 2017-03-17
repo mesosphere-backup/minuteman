@@ -44,15 +44,13 @@ test_gen_server(_Config) ->
     sys:resume(minuteman_mesos_poller).
 
 test_handle_poll_state(Config) ->
-    AgentIP = {1, 1, 1, 1},
+    AgentIP = {10, 0, 0, 243},
     DataDir = ?config(data_dir, Config),
     %%ok = mnesia:dirty_delete(kv2, [minuteman, vips]),
     {ok, Data} = file:read_file(filename:join(DataDir, "named-base-vips.json")),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
     State = {state, AgentIP, 0},
     minuteman_mesos_poller:handle_poll_state(MesosState, State),
-    LashupValue = lashup_kv:value([minuteman, vips]),
-    [{_, [{{10, 0, 0, 243}, 12049}]}] = LashupValue,
     LashupValue2 = lashup_kv:value([minuteman, vips2]),
-    [{_, [{{1, 1, 1, 1}, {{10, 0, 0, 243}, 12049}}]}] = LashupValue2.
+    [{_, [{{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049}}]}] = LashupValue2.
 
