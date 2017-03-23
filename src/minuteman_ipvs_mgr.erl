@@ -67,7 +67,7 @@
 -define(IP_VS_SVC_F_SCHED2,     16#10).          %% scheduler flag 2 */
 -define(IP_VS_SVC_F_SCHED3,     16#20).          %% scheduler flag 3 */
 
--define(IPVS_PROTOCOLS, [tcp]). %% protocols to query gen_netlink for
+-define(IPVS_PROTOCOLS, [tcp, udp]). %% protocols to query gen_netlink for
 
 -type service() :: term().
 -type dest() :: term().
@@ -439,9 +439,15 @@ destination_address_test_() ->
     DAddr = {{10, 10, 0, 83}, 9042},
     [?_assertEqual(DAddr, destination_address(D))].
 
-service_address_test_() ->
+service_address_tcp_test_() ->
+    service_address_(tcp).
+
+service_address_udp_test_() ->
+    service_address_(udp).
+
+service_address_(Protocol) ->
     S = [{address_family, 2},
-         {protocol, 6},
+         {protocol, proto_num(Protocol)},
          {address, <<11, 197, 245, 133, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>>},
          {port, 9042},
          {sched_name, "wlc"},
@@ -458,7 +464,9 @@ service_address_test_() ->
                  {outpps, 0},
                  {inbps, 0},
                  {outbps, 0}]}],
-    SAddr = {tcp, {11, 197, 245, 133}, 9042},
+    SAddr = {Protocol, {11, 197, 245, 133}, 9042},
     [?_assertEqual(SAddr, service_address(S))].
 
+proto_num(tcp) -> 6;
+proto_num(udp) -> 17.
 -endif.
