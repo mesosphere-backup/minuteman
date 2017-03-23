@@ -58,9 +58,9 @@
     }).
 -type state() :: #state{}.
 
--type ip_vip() :: {tcp, inet:ip4_address(), inet:port_number()}.
+-type ip_vip() :: {tcp | udp, inet:ip4_address(), inet:port_number()}.
 -type vip_name() :: binary().
--type named_vip() :: {tcp, {name, {vip_name(), framework_name()}}, inet:port_number()}.
+-type named_vip() :: {tcp | udp, {name, {vip_name(), framework_name()}}, inet:port_number()}.
 -type vip() :: {ip_vip() | named_vip(), [ip_port()]}.
 
 
@@ -242,18 +242,18 @@ rewrite_keys({{RealKey, riak_dt_orswot}, Value}) ->
 %% @doc Extracts name based vips. Binds names
 -spec(rebind_names([vip()], state()) -> [ip_vip()]).
 rebind_names(VIPs0, State) ->
-    Names0 = [Name || {{tcp, {name, Name}, _Portnumber}, _Backends} <- VIPs0],
+    Names0 = [Name || {{_Protocol, {name, Name}, _Portnumber}, _Backends} <- VIPs0],
     Names1 = lists:map(fun({Name, FWName}) -> binary_to_name([Name, FWName]) end, Names0),
     Names2 = lists:usort(Names1),
     update_name_mapping(Names2, State),
     lists:map(fun(VIP) -> rewrite_name(VIP) end, VIPs0).
 
 -spec(rewrite_name(vip()) -> ip_vip()).
-rewrite_name({{tcp, {name, {Name, FWName}}, PortNum}, BEs}) ->
+rewrite_name({{Protocol, {name, {Name, FWName}}, PortNum}, BEs}) ->
     FullName = binary_to_name([Name, FWName]),
     [{_, IPNum}] = ets:lookup(name_to_ip, FullName),
     IP = integer_to_ip(IPNum),
-    {{tcp, IP, PortNum}, BEs};
+    {{Protocol, IP, PortNum}, BEs};
 rewrite_name(Else) ->
     Else.
 
@@ -450,25 +450,33 @@ state() ->
     ets_restart(ip_to_name),
     #state{ref = undefined, min_ip_num = 16#0b000000, max_ip_num = 16#0b0000fe}.
 
-process_vips_test() ->
+process_vips_tcp_test() ->
+    process_vips(tcp).
+
+process_vips_udp_test() ->
+    process_vips(udp).
+
+process_vips(Protocol) ->
     State = state(),
     VIPs = [
         {
-            {{tcp, {1, 2, 3, 4}, 80}, riak_dt_orswot},
+            {{Protocol, {1, 2, 3, 4}, 80}, riak_dt_orswot},
             [{{10, 0, 3, 46}, 11778}]
         },
         {
-            {{tcp, {name, {<<"/foo">>, <<"marathon">>}}, 80}, riak_dt_orswot},
+            {{Protocol, {name, {<<"/foo">>, <<"marathon">>}}, 80}, riak_dt_orswot},
             [{{10, 0, 3, 46}, 25458}]
         }
     ],
     Out = process_vips(VIPs, State),
     Expected = [
-        {{tcp, {1, 2, 3, 4}, 80}, [{{10, 0, 3, 46}, 11778}]},
-        {{tcp, {11, 0, 0, 36}, 80}, [{{10, 0, 3, 46}, 25458}]}
+        {{Protocol, {1, 2, 3, 4}, 80}, [{{10, 0, 3, 46}, 11778}]},
+        {{Protocol, {11, 0, 0, 36}, 80}, [{{10, 0, 3, 46}, 25458}]}
     ],
     ?assertEqual(Expected, Out),
     State.
+
+
 
 update_name_mapping_test() ->
     State0 = state(),
@@ -483,7 +491,7 @@ update_name_mapping_test() ->
 
 
 zone_test() ->
-    State = process_vips_test(),
+    State = process_vips(tcp),
     Components = [<<"l4lb">>, <<"thisdcos">>, <<"directory">>],
     Zone = zone(1463878088, Components, State),
     Expected =

@@ -45,7 +45,7 @@
 -type state() :: #state{}.
 
 -record(vip_be, {
-    protocol = erlang:error() :: tcp,
+    protocol = erlang:error() :: protocol(),
     vip_ip = erlang:error() :: inet:ip4_address(),
     vip_port = erlang:error() :: inet:port_number(),
     backend_ip = erlang:error() :: inet:ip4_address(),
@@ -53,7 +53,7 @@
 }).
 
 -record(vip_be2, {
-    protocol = erlang:error() :: tcp,
+    protocol = erlang:error() :: protocol(),
     vip_ip = erlang:error() :: inet:ip4_address(),
     vip_port = erlang:error() :: inet:port_number(),
     agent_ip = erlang:error() :: inet:ip4_address(),
@@ -463,6 +463,10 @@ collect_vips_from_discovery_info([Port = #mesos_port{labels = PortLabels}| Ports
 -spec(collect_vips_from_discovery_info_fold(LabelBin :: map(), [vips()], mesos_port(), task()) -> [vip_be()]).
 collect_vips_from_discovery_info_fold(_PortLabels, [], _Port, _Task) ->
     [];
+collect_vips_from_discovery_info_fold(_PortLabels, _VIPs,
+    #mesos_port{protocol = Protocol}, #task{name = TaskName}) when Protocol =/= tcp, Protocol =/= udp ->
+    lager:warning("Unsupported protocol ~p in task ~p", [Protocol, TaskName]),
+    [];
 collect_vips_from_discovery_info_fold(#{<<"network-scope">> := <<"container">>}, VIPs,
     #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
     #task{statuses = [#task_status{container_status = #container_status{
@@ -476,7 +480,6 @@ collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
     #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
     [#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
         backend_ip =  AgentIP} || {VIPIP, VIPPort} <- VIPs].
-
 
 %({binary(),_}) -> {{'name',{binary(),'undefined' | binary()}} | {byte(),byte(),byte(),byte()},'error' | integer()}
 
@@ -539,11 +542,11 @@ collect_vips_from_task_labels_fold([VIPLabelKeyBin | VIPLabelKeys],
     TaskPortIdxStr = string:sub_string(VIPLabelStr, string:len(?VIP_PORT) + 1),
     {TaskPortIdx, []} = string:to_integer(TaskPortIdxStr),
     LabelValue = maps:get(VIPLabelKeyBin, TaskLabels),
-    {tcp, VIPIP, VIPPort} = normalize_vip(LabelValue),
+    {Protocol, VIPIP, VIPPort} = normalize_vip(LabelValue),
     Ports = maps:get(ports, Resources),
     BEPort = lists:nth(TaskPortIdx + 1, Ports),
     VIPBE = #vip_be{
-        protocol = tcp,
+        protocol = Protocol,
         vip_ip = VIPIP,
         vip_port = VIPPort,
         backend_ip = AgentIP,
@@ -607,6 +610,7 @@ overlay_vips_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
+
 two_healthcheck_free_vips_test() ->
     {ok, Data} = file:read_file("testdata/two-healthcheck-free-vips-state.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
@@ -628,6 +632,7 @@ two_healthcheck_free_vips_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
+
 state2_test() ->
     {ok, Data} = file:read_file("testdata/state2.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
@@ -641,6 +646,7 @@ state2_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
+
 state3_test() ->
     {ok, Data} = file:read_file("testdata/state3.json"),
     {ok, MesosState} = mesos_state_client:parse_response(Data),
@@ -654,7 +660,6 @@ state3_test() ->
         }
     ],
     ?assertEqual(Expected, VIPBes).
-
 
 state4_test() ->
     {ok, Data} = file:read_file("testdata/state4.json"),
