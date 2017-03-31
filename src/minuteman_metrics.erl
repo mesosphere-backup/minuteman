@@ -126,12 +126,12 @@ update_metrics(Backends, Metrics) ->
 dst_ip_map(Parsed) ->
     lists:foldl(fun vip_addr_map/2, #{}, Parsed).
 
-vip_addr_map(C = #ip_vs_conn{to_ip = IP}, Z) ->
+vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z) ->
     vip_addr_map(C, Z, maps:get(int_to_ip(IP), Z, undefined)).
 
-vip_addr_map(C = #ip_vs_conn{to_ip = IP}, Z, undefined) ->
+vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z, undefined) ->
     maps:put(int_to_ip(IP), [C], Z);
-vip_addr_map(C = #ip_vs_conn{to_ip = IP}, Z, Ls) ->
+vip_addr_map(C = #ip_vs_conn{dst_ip = IP}, Z, Ls) ->
     maps:put(int_to_ip(IP), [C | Ls], Z).
 
 new_connections(PD, Conns, AllConns) ->
@@ -194,9 +194,7 @@ match_metrics(Conns, Addr, Vals) -> match_conn(maps:get(Addr, Conns, undefined),
 match_conn(undefined, _, _) -> [];
 match_conn(_, undefined, _) -> [];
 match_conn(_, _, undefined) -> [];
-match_conn(Conn, RttUs, RttVarUs) -> got_conn(Conn, RttUs, RttVarUs).
-
-got_conn(Conn, RttUs, RttVarUs) -> [{Conn, RttUs, RttVarUs}].
+match_conn(Conns, RttUs, RttVarUs) -> [{Conns, RttUs, RttVarUs}].
 
 apply_p99({Conns, RttUs, RttVarUs}) ->
     lists:flatmap(fun(C) -> apply_p99(C, RttUs, RttVarUs) end, Conns).
@@ -377,8 +375,8 @@ process_p99s_4_test_() ->
 process_dst_ip_map_test_() ->
     DAddr = {54, 192, 147, 29},
     IP = 16#36c0931d,
-    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, IP, 8080, 167792566, 8081, 59},
-    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, IP, 8080, 167792566, 8081, 59},
+    Conn = {ip_vs_conn, tcp, established, 167792566, 47808, 167792566, 8080, IP, 8081, 59},
+    Conn2 = {ip_vs_conn, tcp, established, 167792567, 47808, 167792566, 8080, IP, 8081, 59},
     ConnMap = #{DAddr => [Conn]},
     ConnMap2 = #{DAddr => [Conn2, Conn]},
     [?_assertEqual(DAddr, int_to_ip(IP)),
