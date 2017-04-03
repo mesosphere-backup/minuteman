@@ -271,20 +271,28 @@ generate_ops(AgentIP, AgentVIPs, LashupVIPs) ->
     FlatAgentVIPs = flatten_vips(AgentVIPs),
     FlatLashupVIPs = flatten_vips(LashupVIPs),
     FlatVIPsToAdd = ordsets:subtract(FlatAgentVIPs, FlatLashupVIPs),
-    FlatLashupVIPsFromThisAgent = fetch_vips_from_agent(AgentIP),
+    FlatLashupVIPsFromThisAgent = fetch_vips_from_agent(AgentIP, FlatLashupVIPs),
     FlatVIPsToDel = ordsets:subtract(FlatLashupVIPsFromThisAgent, FlatAgentVIPs),
     {AddOps, DelOps} = generate_add_del_ops(FlatVIPsToAdd, FlatVIPsToDel, FlatLashupVIPs),
     {AddOps2, DelOps2} = generate_add_del_ops2(AgentIP, FlatVIPsToAdd, FlatVIPsToDel, FlatLashupVIPs),
     {AddOps, DelOps, AddOps2, DelOps2}.
 
-fetch_vips_from_agent(AgentIP) ->
+fetch_vips_from_agent(AgentIP, FlatLashupVIPs) ->
     LashupVIPs2 = lashup_kv:value(?VIPS_KEY2),
     FlatLashupVIPs2 = flatten_vips2(LashupVIPs2),
-    FlatLashupVIPsFromThisAgent2 = filter_vips_from_agent(AgentIP, FlatLashupVIPs2),
-    vipbe2_to_vipbe(FlatLashupVIPsFromThisAgent2).
+    fetch_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2).
 
-filter_vips_from_agent(AgentIP, FlatVIPs) ->
-    lists:filter(fun(#vip_be2{agent_ip = AIP}) -> AIP == AgentIP end, FlatVIPs).
+fetch_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2) ->
+    FlatLashupVIPsFromThisAgent2 = filter_vips2_from_agent(AgentIP, FlatLashupVIPs2),
+    FlatLashupVIPsFromThisAgent0 = vipbe2_to_vipbe(FlatLashupVIPsFromThisAgent2),
+    FlatLashupVIPsFromThisAgent1 = filter_vips_from_agent(AgentIP, FlatLashupVIPs),
+    ordsets:union(FlatLashupVIPsFromThisAgent0, FlatLashupVIPsFromThisAgent1).
+
+filter_vips_from_agent(AgentIP, FlatLashupVIPs) ->
+    lists:filter(fun(#vip_be{backend_ip = BEIP}) -> BEIP == AgentIP end, FlatLashupVIPs).
+
+filter_vips2_from_agent(AgentIP, FlatLashupVIPs2) ->
+    lists:filter(fun(#vip_be2{agent_ip = AIP}) -> AIP == AgentIP end, FlatLashupVIPs2).
 
 generate_add_del_ops(FlatVIPsToAdd, FlatVIPsToDel, FlatLashupVIPs) ->
     AddOps = lists:foldl(fun flat_vip_add_fold/2, [], FlatVIPsToAdd),
@@ -740,9 +748,37 @@ filter_vips_test() ->
                          vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049},
                 #vip_be2{vip_ip = VIP2, agent_ip = FakeAgentIP, protocol = tcp,
                          vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
-   FilterVIPs = filter_vips_from_agent(AgentIP, FlatVIPs),
+   FilterVIPs = filter_vips2_from_agent(AgentIP, FlatVIPs),
    Expected = [#vip_be2{vip_ip = VIP1, agent_ip = AgentIP, protocol = tcp,
                          vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
+   ?assertEqual(Expected, FilterVIPs).
+
+fetch_vips_test() ->
+   AgentIP = {1, 1, 1, 1},
+   FlatLashupVIPs = [#vip_be{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
+                             backend_ip = AgentIP, backend_port = 12049}],
+   FilterVIPs = fetch_vips_from_agent(AgentIP, FlatLashupVIPs, []),
+   Expected = FlatLashupVIPs,
+   ?assertEqual(Expected, FilterVIPs).
+
+fetch_vips_1_test() ->
+   AgentIP = {1, 1, 1, 1},
+   FlatLashupVIPs = [#vip_be{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
+                             backend_ip = AgentIP, backend_port = 12049}],
+   FlatLashupVIPs2 = [#vip_be2{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
+                               agent_ip = AgentIP, backend_ip = AgentIP, backend_port = 12049}],
+   FilterVIPs = fetch_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2),
+   Expected = FlatLashupVIPs,
+   ?assertEqual(Expected, FilterVIPs).
+
+fetch_vips_2_test() ->
+   AgentIP = {1, 1, 1, 1},
+   FlatLashupVIPs = [#vip_be{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
+                             backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
+   FlatLashupVIPs2 = [#vip_be2{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
+                               agent_ip = AgentIP, backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
+   FilterVIPs = fetch_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2),
+   Expected = FlatLashupVIPs,
    ?assertEqual(Expected, FilterVIPs).
 
 flatten_vips_test() ->
