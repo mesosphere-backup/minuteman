@@ -13,6 +13,32 @@ all() ->
    lookup_failure2,
    lookup_failure3].
 
+init_per_suite(Config) ->
+  %% this might help, might not...
+  os:cmd(os:find_executable("epmd") ++ " -daemon"),
+  {ok, Hostname} = inet:gethostname(),
+  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
+    {ok, _} -> ok;
+    {error, {already_started, _}} -> ok
+  end,
+  Config.
+
+end_per_suite(Config) ->
+  net_kernel:stop(),
+  Config.
+
+init_per_testcase(test_uninitalized_table, Config) -> Config;
+init_per_testcase(_, Config) ->
+  application:set_env(minuteman, enable_networking, false),
+  {ok, _} = application:ensure_all_started(minuteman),
+  Config.
+
+end_per_testcase(test_uninitalized_table, _Config) -> ok;
+end_per_testcase(_, _Config) ->
+  ok = application:stop(minuteman),
+  ok = application:stop(lashup),
+  ok = application:stop(mnesia).
+
 test_uninitalized_table(_Config) ->
   IP = {10, 0, 1, 10},
   [] = minuteman_lashup_vip_listener:lookup_vips([{ip, IP}]),
@@ -49,14 +75,3 @@ lookup_vip(_Config) ->
   [{ip, IP}] = minuteman_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
   [{name, <<"de8b9dc86.marathon">>}] = minuteman_lashup_vip_listener:lookup_vips([{ip, IP}]),
   ok.
-init_per_testcase(test_uninitalized_table, Config) -> Config;
-init_per_testcase(_, Config) ->
-  application:set_env(minuteman, enable_networking, false),
-  {ok, _} = application:ensure_all_started(minuteman),
-  Config.
-
-end_per_testcase(test_uninitalized_table, _Config) -> ok;
-end_per_testcase(_, _Config) ->
-  ok = application:stop(minuteman),
-  ok = application:stop(lashup),
-  ok = application:stop(mnesia).

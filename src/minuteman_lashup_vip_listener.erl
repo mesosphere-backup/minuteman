@@ -27,7 +27,8 @@
 -include_lib("telemetry/include/telemetry.hrl").
 
 -define(SERVER, ?MODULE).
--define(RPC_TIMEOUT, 1000).
+-define(RPC_TIMEOUT, 5000).
+-define(MON_CALLBACK_TIME, 5000).
 -define(RPC_RETRY_TIME, 15000).
 -define(ZONE_NAMES, [
     [<<"l4lb">>, <<"thisdcos">>, <<"directory">>],
@@ -54,6 +55,7 @@
     min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
     max_ip_num = erlang:error(no_max_ip_num) :: ip4_num(),
     retry_timer :: undefined | timer:tref(),
+    monitorRef :: reference(),
     vips
     }).
 -type state() :: #state{}.
@@ -62,9 +64,6 @@
 -type vip_name() :: binary().
 -type named_vip() :: {tcp | udp, {name, {vip_name(), framework_name()}}, inet:port_number()}.
 -type vip() :: {ip_vip() | named_vip(), [ip_port()]}.
-
-
-
 
 %%%===================================================================
 %%% API
@@ -104,8 +103,9 @@ init([]) ->
     ets_restart(ip_to_name),
     MinIP = ip_to_integer(minuteman_config:min_named_ip()),
     MaxIP = ip_to_integer(minuteman_config:max_named_ip()),
+    MonitorRef = setup_monitor(),
     {ok, Ref} = lashup_kv_events_helper:start_link(ets:fun2ms(fun({?VIPS_KEY}) -> true end)),
-    State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP},
+    State = #state{ref = Ref, max_ip_num = MaxIP, min_ip_num = MinIP, monitorRef = MonitorRef},
     {ok, State}.
 
 %%--------------------------------------------------------------------
@@ -159,7 +159,18 @@ handle_cast(_Request, State) ->
 handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Ref}) when Ref == Reference ->
     State1 = handle_event(Event, State0),
     {noreply, State1};
+handle_info({'DOWN', MonitorRef, process, _, _}, State = #state{monitorRef = MonitorRef}) ->
+   lager:debug("Spartan monitor went off, maybe it got restarted"),
+   timer:send_after(?MON_CALLBACK_TIME, retry_monitor),
+   {noreply, State};
+handle_info(retry_monitor, State = #state{retry_timer = Timer}) ->
+   lager:debug("Setting retry due to monitor went off"),
+   timer:cancel(Timer),
+   MonitorRef = setup_monitor(),
+   {ok, NewTimer} = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
+   {noreply, State#state{monitorRef = MonitorRef, retry_timer = NewTimer}};
 handle_info(retry_spartan, State0) ->
+    lager:debug("Retrying to push the DNS config"),
     State1 = retry_spartan(State0),
     {noreply, State1};
 handle_info(_Info, State) ->
@@ -257,16 +268,22 @@ rewrite_name({{Protocol, {name, {Name, FWName}}, PortNum}, BEs}) ->
 rewrite_name(Else) ->
     Else.
 
+setup_monitor() ->
+    monitor(process, {erldns_zone_cache, spartan_name()}).
+
 retry_spartan(State) ->
     push_state_to_spartan(State).
 
-push_state_to_spartan(State0) ->
+push_state_to_spartan(State) ->
     ZoneNames = ?ZONE_NAMES,
-    Zones = lists:map(fun(ZoneName) -> zone(ZoneName, State0) end, ZoneNames),
-    push_zones(Zones),
-    {ok, Timer} = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
-    State1 = State0#state{retry_timer = Timer},
-    State1.
+    Zones = lists:map(fun(ZoneName) -> zone(ZoneName, State) end, ZoneNames),
+    case push_zones(Zones) of
+        ok ->
+            State;
+        error ->
+            {ok, Timer} = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
+            State#state{retry_timer = Timer}
+    end.
 
 push_zones([]) ->
     ok;

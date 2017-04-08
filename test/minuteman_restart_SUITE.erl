@@ -5,6 +5,19 @@
 
 all() -> [test_restart].
 
+init_per_suite(Config) ->
+  %% this might help, might not...
+  os:cmd(os:find_executable("epmd") ++ " -daemon"),
+  {ok, Hostname} = inet:gethostname(),
+  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
+    {ok, _} -> ok;
+    {error, {already_started, _}} -> ok
+  end,
+  Config.
+
+end_per_suite(Config) ->
+  net_kernel:stop(),
+  Config.
 
 test_restart(Config) ->
   PrivateDir = ?config(priv_dir, Config),
