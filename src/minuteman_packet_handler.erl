@@ -110,7 +110,7 @@ is_local(_) ->
 %% TODO: Setup test fixtures
 %% TODO: Write Proper tests
 
-local_to_foreign() ->
+local_to_foreign_test() ->
   minuteman_vip_server:start_link_nosubscribe(),
   VIP = {tcp, {1, 1, 1, 1}, 1000},
   Backend = {{8, 8, 8, 8}, 31421},
@@ -120,7 +120,11 @@ local_to_foreign() ->
   meck:new(minuteman_iface_server),
   meck:expect(minuteman_iface_server, is_local, fun is_local/1),
   meck:expect(minuteman_routes, get_route, fun({8, 8, 8, 8}) -> {ok, [{prefsrc, {9, 9, 9, 9}}]} end),
-  minuteman_lb:start_link(),
+  meck:new(minuteman_lashup_index),
+  meck:expect(minuteman_lashup_index, nodenames, fun({8, 8, 8, 8}) -> [] end),
+  {ok, _} = minuteman_lb:start_link(),
+  {ok, TreePid} = lashup_gm_route:start_link(),
+  unlink(TreePid),
 
   Payload = <<>>,
   TCP = #tcp{sport = 55000, dport = 1000},
@@ -138,8 +142,8 @@ local_to_foreign() ->
   ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
   meck:unload(),
   gen_server:call(minuteman_vip_server, stop),
-  gen_server:call(minuteman_lb, stop).
-
+  gen_server:call(minuteman_lb, stop),
+  gen_server:stop(TreePid, shutdown, 5000).
 
 foreign_to_foreign_test() ->
   Payload = <<>>,
@@ -160,6 +164,8 @@ foreign_to_foreign_test() ->
   meck:expect(minuteman_iface_server, is_local, fun is_local/1),
   meck:new(minuteman_routes),
   meck:expect(minuteman_routes, get_route, fun({8, 8, 8, 8}) -> {ok, [{prefsrc, {9, 9, 9, 9}}]} end),
+  meck:new(minuteman_lashup_index),
+  meck:expect(minuteman_lashup_index, nodenames, fun({8, 8, 8, 8}) -> [] end),
   ExpectedMapping = #mapping{
     orig_src_ip = {8, 8, 4, 4},
     orig_src_port = 55000,
@@ -168,7 +174,8 @@ foreign_to_foreign_test() ->
     new_src_ip = {9, 9, 9, 9},
     new_dst_ip = {8, 8, 8, 8},
     new_dst_port = 31421},
-  ?assertEqual({ok, ExpectedMapping}, to_mapping(Packet)),
+  ActualMapping = to_mapping(Packet),
+  ?assertEqual({ok, ExpectedMapping}, ActualMapping),
   meck:unload(),
   ok = gen_server:call(minuteman_vip_server, stop),
   ok = gen_server:call(minuteman_lb, stop),
