@@ -13,6 +13,36 @@ all() -> [test_init,
           test_one_conn,
           test_gen_server].
 
+init_per_suite(Config) ->
+  %% this might help, might not...
+  os:cmd(os:find_executable("epmd") ++ " -daemon"),
+  {ok, Hostname} = inet:gethostname(),
+  case net_kernel:start([list_to_atom("runner@" ++ Hostname), shortnames]) of
+    {ok, _} -> ok;
+    {error, {already_started, _}} -> ok
+  end,
+  Config.
+
+end_per_suite(Config) ->
+  net_kernel:stop(),
+  Config.
+
+init_per_testcase(Test, Config) ->
+    application:set_env(ip_vs_conn, proc_file, proc_file(Config, Test)),
+    case os:cmd("id -u") of
+        "0\n" ->
+            ok;
+        _ ->
+            application:set_env(minuteman, enable_networking, false)
+    end,
+    set_interval(Test),
+    {ok, _} = application:ensure_all_started(minuteman),
+    Config.
+
+end_per_testcase(_, _Config) ->
+  ok = application:stop(minuteman),
+  ok = application:stop(lashup),
+  ok = application:stop(mnesia).
 
 test_init(_Config) -> ok.
 test_gen_server(_Config) ->
@@ -88,22 +118,3 @@ set_interval(test_wait_metrics) ->
     application:set_env(minuteman, metrics_interval_seconds, 1),
     application:set_env(minuteman, metrics_splay_seconds, 1);
 set_interval(_) -> ok.
-
-init_per_testcase(Test, Config) ->
-    PrivateDir = ?config(priv_dir, Config),
-    application:set_env(minuteman, agent_dets_basedir, PrivateDir),
-    application:set_env(ip_vs_conn, proc_file, proc_file(Config, Test)),
-    case os:cmd("id -u") of
-        "0\n" ->
-            ok;
-        _ ->
-            application:set_env(minuteman, enable_networking, false)
-    end,
-    set_interval(Test),
-    {ok, _} = application:ensure_all_started(minuteman),
-    Config.
-
-end_per_testcase(_, _Config) ->
-  ok = application:stop(minuteman),
-  ok = application:stop(lashup),
-  ok = application:stop(mnesia).
