@@ -10,12 +10,11 @@ dependencies:
     - .cache
     - ~/.cache
   pre:
-    - sudo service mongod stop
-    - sudo service rabbitmq-server stop
-    - sudo service zookeeper stop
-    - sudo service mysql stop
-    - sudo service postgresql stop
-    - sudo service redis-server stop
+    - sudo /etc/init.d/mongod stop
+    - sudo /etc/init.d/rabbitmq-server stop
+    - sudo /etc/init.d/mysql stop
+    - sudo /etc/init.d/postgresql stop
+    - sudo /etc/init.d/x11-common stop
     - curl -O -L https://raw.githubusercontent.com/yrashk/kerl/master/kerl && chmod 755 kerl
     - if [ ! -d ~/extras/otp/19.1 ]; then ./kerl build 19.1 19.1; ./kerl install 19.1 ~/extras/otp/19.1; fi:
         timeout: 1800
