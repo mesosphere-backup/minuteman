@@ -156,7 +156,7 @@ handle_cast(_Request, State) ->
     {noreply, NewState :: state()} |
     {noreply, NewState :: state(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: state()}).
-handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Ref}) when Ref == Reference ->
+handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref = Reference}) ->
     State1 = handle_event(Event, State0),
     {noreply, State1};
 handle_info({'DOWN', MonitorRef, process, _, _}, State = #state{monitorRef = MonitorRef}) ->
