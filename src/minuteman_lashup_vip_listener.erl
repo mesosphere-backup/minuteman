@@ -165,7 +165,7 @@ handle_info({'DOWN', MonitorRef, process, _, _}, State = #state{monitorRef = Mon
    {noreply, State};
 handle_info(retry_monitor, State = #state{retry_timer = Timer}) ->
    lager:debug("Setting retry due to monitor went off"),
-   erlang:cancel(Timer),
+   cancel_retry_timer(Timer),
    MonitorRef = setup_monitor(),
    NewTimer = erlang:send_after(?RPC_RETRY_TIME, self(), retry_spartan),
    {noreply, State#state{monitorRef = MonitorRef, retry_timer = NewTimer}};
@@ -235,17 +235,21 @@ handle_event(_Event = #{value := VIPs}, State) ->
     handle_value(VIPs, State).
 
 handle_value(VIPs0, State0 = #state{retry_timer = Timer}) ->
-    erlang:cancel(Timer),
+    cancel_retry_timer(Timer),
     VIPs1 = process_vips(VIPs0, State0),
     State1 = State0#state{vips = VIPs1},
     State2 = push_state_to_spartan(State1),
     minuteman_lb_mgr:push_vips(VIPs1),
     State2.
 
+cancel_retry_timer(Timer) when is_reference(Timer) ->
+    erlang:cancel_timer(Timer);
+cancel_retry_timer(_) ->
+    ok.
+
 process_vips(VIPs0, State) ->
     VIPs1 = lists:map(fun rewrite_keys/1, VIPs0),
     rebind_names(VIPs1, State).
-
 
 rewrite_keys({{RealKey, riak_dt_orswot}, Value}) ->
     {RealKey, Value}.
