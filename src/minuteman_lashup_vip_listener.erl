@@ -54,7 +54,7 @@
     ref = erlang:error() :: reference(),
     min_ip_num = erlang:error(no_min_ip_num) :: ip4_num(),
     max_ip_num = erlang:error(no_max_ip_num) :: ip4_num(),
-    retry_timer :: undefined | timer:tref(),
+    retry_timer :: undefined | reference(),
     monitorRef :: reference(),
     vips
     }).
@@ -161,13 +161,13 @@ handle_info({lashup_kv_events, Event = #{ref := Reference}}, State0 = #state{ref
     {noreply, State1};
 handle_info({'DOWN', MonitorRef, process, _, _}, State = #state{monitorRef = MonitorRef}) ->
    lager:debug("Spartan monitor went off, maybe it got restarted"),
-   timer:send_after(?MON_CALLBACK_TIME, retry_monitor),
+   erlang:send_after(?MON_CALLBACK_TIME, self(), retry_monitor),
    {noreply, State};
 handle_info(retry_monitor, State = #state{retry_timer = Timer}) ->
    lager:debug("Setting retry due to monitor went off"),
-   timer:cancel(Timer),
+   erlang:cancel(Timer),
    MonitorRef = setup_monitor(),
-   {ok, NewTimer} = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
+   NewTimer = erlang:send_after(?RPC_RETRY_TIME, self(), retry_spartan),
    {noreply, State#state{monitorRef = MonitorRef, retry_timer = NewTimer}};
 handle_info(retry_spartan, State0) ->
     lager:debug("Retrying to push the DNS config"),
@@ -235,7 +235,7 @@ handle_event(_Event = #{value := VIPs}, State) ->
     handle_value(VIPs, State).
 
 handle_value(VIPs0, State0 = #state{retry_timer = Timer}) ->
-    timer:cancel(Timer),
+    erlang:cancel(Timer),
     VIPs1 = process_vips(VIPs0, State0),
     State1 = State0#state{vips = VIPs1},
     State2 = push_state_to_spartan(State1),
@@ -281,7 +281,7 @@ push_state_to_spartan(State) ->
         ok ->
             State;
         error ->
-            {ok, Timer} = timer:send_after(?RPC_RETRY_TIME, retry_spartan),
+            Timer = erlang:send_after(?RPC_RETRY_TIME, self(), retry_spartan),
             State#state{retry_timer = Timer}
     end.
 
