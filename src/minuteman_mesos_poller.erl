@@ -103,7 +103,7 @@ start_link() ->
     {stop, Reason :: term()} | ignore).
 init([]) ->
     PollInterval = minuteman_config:agent_poll_interval(),
-    timer:send_after(PollInterval, poll),
+    erlang:send_after(PollInterval, self(), poll),
     AgentIP = mesos_state:ip(),
     {ok, #state{agent_ip = AgentIP}}.
 
@@ -156,7 +156,7 @@ handle_cast(_Request, State) ->
 handle_info(poll, State) ->
     NewState = maybe_poll(State),
     PollInterval = minuteman_config:agent_poll_interval(),
-    {ok, _} = timer:send_after(PollInterval, poll),
+    _Ref = erlang:send_after(PollInterval, self(), poll),
     {noreply, NewState};
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -769,4 +769,3 @@ flatten_vips_test() ->
                          agent_ip = {1, 1, 1, 1}, backend_port = 12049, backend_ip = {10, 0, 0, 243}}],
     ?assertEqual(Expected, FlatVIPs).
 -endif.
-
