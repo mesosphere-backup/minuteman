@@ -73,14 +73,14 @@ webserver(Pid) ->
 
 add_webserver(VIP, {IP, Port}) ->
     % inject an update for this vip
-    {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update, {VIP, riak_dt_orswot}, {add, {IP, Port} }}]}).
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update, {VIP, riak_dt_orswot}, {add, {IP, {IP, Port}}}}]}).
 
 remove_webserver(VIP, {IP, Port}) ->
     % inject an update for this vip
-    {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update, {VIP, riak_dt_orswot}, {remove, {IP, Port} }}]}).
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update, {VIP, riak_dt_orswot}, {remove, {IP, {IP, Port}}}}]}).
 
 remove_vip(VIP) ->
-    {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{remove, {VIP, riak_dt_orswot}}]}).
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{remove, {VIP, riak_dt_orswot}}]}).
 
 
 test_vip(VIP) ->

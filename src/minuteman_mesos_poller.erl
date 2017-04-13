@@ -44,14 +44,6 @@
 
 -type state() :: #state{}.
 
--record(vip_be, {
-    protocol = erlang:error() :: protocol(),
-    vip_ip = erlang:error() :: inet:ip4_address(),
-    vip_port = erlang:error() :: inet:port_number(),
-    backend_ip = erlang:error() :: inet:ip4_address(),
-    backend_port = erlang:error() :: inet:port_number()
-}).
-
 -record(vip_be2, {
     protocol = erlang:error() :: protocol(),
     vip_ip = erlang:error() :: inet:ip4_address(),
@@ -61,7 +53,6 @@
     backend_port = erlang:error() :: inet:port_number()
 }).
 
--type vip_be() :: #vip_be{}.
 -type vip_be2() :: #vip_be2{}.
 
 -type protocol_vip() :: {protocol(), Host :: inet:ip4_address() | string(), inet:port_number()}.
@@ -234,24 +225,11 @@ handle_poll_state(MesosState, State) ->
     handle_poll_changes(VIPBEs, State#state.agent_ip),
     State#state{last_poll_time = erlang:monotonic_time()}.
 
--spec(handle_poll_changes([vip_be()], inet:ip4_address()) -> ok | {ok, _}).
+-spec(handle_poll_changes([vip_be2()], inet:ip4_address()) -> ok | {ok, _}).
 handle_poll_changes(VIPBEs, AgentIP) ->
-    Ops = generate_ops(AgentIP, VIPBEs),
-    maybe_perform_update(Ops).
-
-%% For data consistency, data in new key should always
-%% be a super set of data in old key. Therefore,
-%% the order of updates is important.
-
-maybe_perform_update({AddOps, DelOps, AddOps2, DelOps2}) ->
-    %% first delete from old key
-    maybe_perform_ops(?VIPS_KEY, DelOps),
-    %% second delete from new key
-    maybe_perform_ops(?VIPS_KEY2, DelOps2),
-    %% third add to new key
-    maybe_perform_ops(?VIPS_KEY2, AddOps2),
-    %% last add to old key
-    maybe_perform_ops(?VIPS_KEY, AddOps).
+    LashupVIPs = lashup_kv:value(?VIPS_KEY2),
+    Ops = generate_ops(AgentIP, VIPBEs, LashupVIPs),
+    maybe_perform_ops(?VIPS_KEY2, Ops).
 
 maybe_perform_ops(_, []) ->
     ok;
@@ -266,50 +244,21 @@ maybe_perform_ops(Key, Ops) ->
 %% For this reason we have to reverse the ops before applying them
 %% Since the way that it generates this results in this list being reversed
 
-generate_ops(AgentIP, AgentVIPs) ->
+generate_ops(AgentIP, AgentVIPs, LashupVIPs) ->
+    lists:reverse(generate_ops1(AgentIP, AgentVIPs, LashupVIPs)).
+
+generate_ops1(AgentIP, AgentVIPs, LashupVIPs) ->
     FlatAgentVIPs = flatten_vips(AgentVIPs),
-    FlatLashupVIPs = flatten_vips(lashup_kv:value(?VIPS_KEY)),
-    FlatLashupVIPs2 = flatten_vips(lashup_kv:value(?VIPS_KEY2)),
-    FlatLashupVIPsFromThisAgent = filter_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2),
-    {AddOps, DelOps} = generate_add_del_ops(FlatAgentVIPs, FlatLashupVIPsFromThisAgent, FlatLashupVIPs),
-    {AddOps2, DelOps2} = generate_add_del_ops(vipbe_to_vipbe2(AgentIP, FlatAgentVIPs),
-                             vipbe_to_vipbe2(AgentIP, FlatLashupVIPsFromThisAgent), FlatLashupVIPs2),
-    {AddOps, DelOps, AddOps2, DelOps2}.
-
-filter_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2) ->
-    VIPs1 = agent_vips(AgentIP, FlatLashupVIPs),
-    VIPs2 = agent_vips(AgentIP, FlatLashupVIPs2),
-    ordsets:union(VIPs1, VIPs2).
-
--spec(agent_vips(inet:ip4_address(), [vip_be()|vip_be2()]) -> [vip_be()]).
-agent_vips(AgentIP, VIPBEs) ->
-    agent_vips(AgentIP, VIPBEs, []).
-
-agent_vips(_, [], Acc) -> Acc;
-agent_vips(AIP, [#vip_be{backend_ip = AIP}=V|R], Acc) -> agent_vips(AIP, R, [V|Acc]);
-agent_vips(AIP, [#vip_be2{agent_ip = AIP}=V2|R], Acc) -> agent_vips(AIP, R, [vipbe2_to_vipbe(V2)|Acc]);
-agent_vips(AIP, [_|R], Acc) -> agent_vips(AIP, R, Acc).
-
-generate_add_del_ops(FlatAgentVIPs, FlatLashupVIPsFromThisAgent, FlatLashupVIPs) ->
+    FlatLashupVIPs = flatten_vips(LashupVIPs),
     FlatVIPsToAdd = ordsets:subtract(FlatAgentVIPs, FlatLashupVIPs),
+    FlatLashupVIPsFromThisAgent = filter_vips_from_agent(AgentIP, FlatLashupVIPs),
     FlatVIPsToDel = ordsets:subtract(FlatLashupVIPsFromThisAgent, FlatAgentVIPs),
-    AddOps = lists:foldl(fun flat_vip_add_fold/2, [], FlatVIPsToAdd),
-    DelOps0 = lists:foldl(fun flat_vip_del_fold/2, [], FlatVIPsToDel),
-    DelOps1 = add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, DelOps0),
-    {lists:reverse(AddOps), lists:reverse(DelOps1)}.
+    Ops0 = lists:foldl(fun flat_vip_add_fold/2, [], FlatVIPsToAdd),
+    Ops1 = lists:foldl(fun flat_vip_del_fold/2, Ops0, FlatVIPsToDel),
+    add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, Ops1).
 
--spec(vipbe2_to_vipbe(vip_be2()) -> vip_be()).
-vipbe2_to_vipbe(#vip_be2{protocol = Proto, vip_ip = VIP, vip_port = Port,
-                backend_ip = BE, backend_port = BPort}) ->
-    #vip_be{protocol = Proto, vip_ip = VIP, vip_port = Port,
-             backend_ip = BE, backend_port = BPort}.
-
--spec(vipbe_to_vipbe2(inet:ip4_address(), [vip_be()]) -> [vip_be2()]).
-vipbe_to_vipbe2(AgentIP,  FlatVIPs) ->
-    [#vip_be2{protocol = Proto, vip_ip = VIP, vip_port = Port,
-              agent_ip = AgentIP, backend_ip = BE, backend_port = BPort} ||
-        #vip_be{protocol = Proto, vip_ip = VIP, vip_port = Port,
-                backend_ip = BE, backend_port = BPort} <- FlatVIPs].
+filter_vips_from_agent(AgentIP, FlatLashupVIPs) ->
+    lists:filter(fun(#vip_be2{agent_ip = AIP}) -> AIP == AgentIP end, FlatLashupVIPs).
 
 add_cleanup_ops(FlatLashupVIPs, FlatVIPsToDel, Ops0) ->
     ExistingProtocolVIPs = lists:map(fun to_protocol_vip/1, FlatLashupVIPs),
@@ -323,59 +272,44 @@ flat_vip_gc_fold(VIP, Acc) ->
     Op = {remove, Field},
     [Op | Acc].
 
-flat_vip_add_fold(VIPBE = #vip_be{backend_ip = BEIP, backend_port = BEPort}, Acc) ->
-    Field = {to_protocol_vip(VIPBE), riak_dt_orswot},
-    Op = {update, Field, {add, {BEIP, BEPort}}},
-    [Op | Acc];
 flat_vip_add_fold(VIPBE = #vip_be2{agent_ip = AgentIP, backend_ip = BEIP, backend_port = BEPort}, Acc) ->
     Field = {to_protocol_vip(VIPBE), riak_dt_orswot},
     Op = {update, Field, {add, {AgentIP, {BEIP, BEPort}}}},
     [Op | Acc].
 
-flat_vip_del_fold(VIPBE = #vip_be{backend_ip = BEIP, backend_port = BEPort}, Acc) ->
-    Field = {to_protocol_vip(VIPBE), riak_dt_orswot},
-    Op = {update, Field, {remove, {BEIP, BEPort}}},
-    [Op | Acc];
 flat_vip_del_fold(VIPBE = #vip_be2{agent_ip = AgentIP, backend_ip = BEIP, backend_port = BEPort}, Acc) ->
     Field = {to_protocol_vip(VIPBE), riak_dt_orswot},
     Op = {update, Field, {remove, {AgentIP, {BEIP, BEPort}}}},
     [Op | Acc].
 
--spec(to_protocol_vip(vip_be()|vip_be2()) -> protocol_vip()).
-to_protocol_vip(#vip_be{vip_ip = VIPIP, protocol = Protocol, vip_port = VIPPort}) ->
-    {Protocol, VIPIP, VIPPort};
+-spec(to_protocol_vip(vip_be2()) -> protocol_vip()).
 to_protocol_vip(#vip_be2{vip_ip = VIPIP, protocol = Protocol, vip_port = VIPPort}) ->
     {Protocol, VIPIP, VIPPort}.
 
--spec(flatten_vips([{VIP :: protocol_vip() | protocol_vip_orswot(),
-        [Backend :: ip_port() | ip_ip_port()]}]) -> [vip_be()|vip_be2()]).
+-spec(flatten_vips([{VIP :: protocol_vip() | protocol_vip_orswot(), [Backend :: ip_ip_port()]}]) -> [vip_be2()]).
 flatten_vips(VIPDict) ->
-    VIPBEs = lists:flatmap(fun flatten_vips2/1, VIPDict),
+    VIPBEs =
+        lists:flatmap(
+            fun
+                ({{{Protocol, VIPIP, VIPPort}, riak_dt_orswot}, Backends}) ->
+                    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = BEPort,
+                        backend_ip =  BEIP, agent_ip = AgentIP} || {AgentIP, {BEIP, BEPort}} <- Backends];
+                ({{Protocol, VIPIP, VIPPort}, Backends}) ->
+                    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = BEPort,
+                        backend_ip =  BEIP, agent_ip = AgentIP} || {AgentIP, {BEIP, BEPort}} <- Backends]
+            end,
+            VIPDict
+        ),
     ordsets:from_list(VIPBEs).
 
-flatten_vips2({{VIP, riak_dt_orswot}, Backends}) ->
-    flatten_vips2(VIP, Backends, []);
-flatten_vips2({VIP, Backends}) ->
-    flatten_vips2(VIP, Backends, []).
-
-flatten_vips2(_VIP, [], Acc) -> Acc;
-flatten_vips2(VIP = {Protocol, VIPIP, VIPPort}, [{AgentIP, {BEIP, BEPort}}|R], Acc) ->
-    VIPBe = #vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol,
-                     backend_port = BEPort, backend_ip =  BEIP, agent_ip = AgentIP},
-    flatten_vips2(VIP, R, [VIPBe | Acc]);
-flatten_vips2(VIP = {Protocol, VIPIP, VIPPort}, [{BEIP, BEPort}|R], Acc) ->
-    VIPBe = #vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol,
-                    backend_port = BEPort, backend_ip =  BEIP},
-    flatten_vips2(VIP, R, [VIPBe | Acc]).
-
--spec(unflatten_vips([vip_be()]) -> [{VIP :: protocol_vip(), [Backend :: ip_port()]}]).
+-spec(unflatten_vips([vip_be2()]) -> [{VIP :: protocol_vip(), [Backend :: ip_ip_port()]}]).
 unflatten_vips(VIPBes) ->
     VIPBEsDict =
         lists:foldl(
-            fun(#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = BEPort,
-                    backend_ip = BEIP},
+            fun(#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = BEPort,
+                    backend_ip = BEIP, agent_ip = AgentIP},
                 Acc) ->
-                orddict:append({Protocol, VIPIP, VIPPort}, {BEIP, BEPort}, Acc)
+                orddict:append({Protocol, VIPIP, VIPPort}, {AgentIP, {BEIP, BEPort}}, Acc)
             end,
             orddict:new(),
             VIPBes
@@ -383,7 +317,7 @@ unflatten_vips(VIPBes) ->
     orddict:map(fun(_Key, Value) -> ordsets:from_list(Value) end, VIPBEsDict).
 
 -spec(collect_vips(MesosState :: mesos_state_client:mesos_agent_state(), State :: state()) ->
-    [{VIP :: protocol_vip(), [Backend :: ip_port()]}]).
+    [{VIP :: protocol_vip(), [Backend :: ip_ip_port()]}]).
 collect_vips(MesosState, _State) ->
     Tasks = mesos_state_client:tasks(MesosState),
     Tasks1 =
@@ -422,7 +356,7 @@ collect_vips_from_discovery_info(Task = #task{discovery = #discovery{ports = Por
     collect_vips_from_discovery_info(Ports, Task, []).
 
 
--spec(collect_vips_from_discovery_info([mesos_port()], task(), [vip_be()]) -> [vip_be()]).
+-spec(collect_vips_from_discovery_info([mesos_port()], task(), [vip_be2()]) -> [vip_be2()]).
 collect_vips_from_discovery_info([], _Task, Acc) ->
     Acc;
 collect_vips_from_discovery_info([Port = #mesos_port{labels = PortLabels}| Ports],
@@ -442,7 +376,7 @@ collect_vips_from_discovery_info([Port = #mesos_port{labels = PortLabels}| Ports
 
 -type name_or_ip() :: inet:ip4_address() | {name, Hostname :: binary(), FrameworkName :: framework_name()}.
 -type vips() :: {name_or_ip(), inet:port_number()}.
--spec(collect_vips_from_discovery_info_fold(LabelBin :: map(), [vips()], mesos_port(), task()) -> [vip_be()]).
+-spec(collect_vips_from_discovery_info_fold(LabelBin :: map(), [vips()], mesos_port(), task()) -> [vip_be2()]).
 collect_vips_from_discovery_info_fold(_PortLabels, [], _Port, _Task) ->
     [];
 collect_vips_from_discovery_info_fold(_PortLabels, _VIPs,
@@ -451,17 +385,19 @@ collect_vips_from_discovery_info_fold(_PortLabels, _VIPs,
     [];
 collect_vips_from_discovery_info_fold(#{<<"network-scope">> := <<"container">>}, VIPs,
     #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
+    Slave = Task#task.slave,
+    #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
     #task{statuses = [#task_status{container_status = #container_status{
           network_infos = [#network_info{ip_addresses = [#ip_address{
           ip_address = IPAddress}|_]}|_]}}|_]} = Task,
-    [#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
-        backend_ip =  IPAddress} || {VIPIP, VIPPort} <- VIPs];
+    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
+        backend_ip =  IPAddress, agent_ip = AgentIP} || {VIPIP, VIPPort} <- VIPs];
 collect_vips_from_discovery_info_fold(_PortLabels, VIPs,
     #mesos_port{protocol = Protocol, number = PortNum}, Task) ->
     Slave = Task#task.slave,
     #libprocess_pid{ip = AgentIP} = Slave#slave.pid,
-    [#vip_be{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
-        backend_ip =  AgentIP} || {VIPIP, VIPPort} <- VIPs].
+    [#vip_be2{vip_ip = VIPIP, vip_port = VIPPort, protocol = Protocol, backend_port = PortNum,
+        backend_ip =  AgentIP, agent_ip = AgentIP} || {VIPIP, VIPPort} <- VIPs].
 
 %({binary(),_}) -> {{'name',{binary(),'undefined' | binary()}} | {byte(),byte(),byte(),byte()},'error' | integer()}
 
@@ -527,10 +463,11 @@ collect_vips_from_task_labels_fold([VIPLabelKeyBin | VIPLabelKeys],
     {Protocol, VIPIP, VIPPort} = normalize_vip(LabelValue),
     Ports = maps:get(ports, Resources),
     BEPort = lists:nth(TaskPortIdx + 1, Ports),
-    VIPBE = #vip_be{
+    VIPBE = #vip_be2{
         protocol = Protocol,
         vip_ip = VIPIP,
         vip_port = VIPPort,
+        agent_ip = AgentIP,
         backend_ip = AgentIP,
         backend_port = BEPort
     },
@@ -587,7 +524,7 @@ overlay_vips_test() ->
         {
            {tcp, {1, 2, 3, 4}, 5000},
            [
-              {{9, 0, 1, 130}, 80}
+              {{10, 0, 1, 248}, {{9, 0, 1, 130}, 80}}
            ]
         }
     ],
@@ -601,15 +538,15 @@ two_healthcheck_free_vips_test() ->
         {
             {tcp, {4, 3, 2, 1}, 1234},
                 [
-                    {{33, 33, 33, 1}, 31362},
-                    {{33, 33, 33, 1}, 31634}
+                    {{33, 33, 33, 1}, {{33, 33, 33, 1}, 31362}},
+                    {{33, 33, 33, 1}, {{33, 33, 33, 1}, 31634}}
                 ]
         },
         {
             {tcp, {4, 3, 2, 2}, 1234},
                 [
-                    {{33, 33, 33, 1}, 31215},
-                    {{33, 33, 33, 1}, 31290}
+                    {{33, 33, 33, 1}, {{33, 33, 33, 1}, 31215}},
+                    {{33, 33, 33, 1}, {{33, 33, 33, 1}, 31290}}
                 ]
         }
     ],
@@ -623,7 +560,7 @@ state2_test() ->
         {
             {tcp, {1, 2, 3, 4}, 5000},
             [
-                {{10, 10, 0, 109}, 8014}
+                {{10, 10, 0, 109}, {{10, 10, 0, 109}, 8014}}
             ]
         }
     ],
@@ -637,7 +574,7 @@ state3_test() ->
         {
             {tcp, {1, 2, 3, 4}, 5000},
             [
-                {{10, 0, 0, 243}, 26645}
+                {{10, 0, 0, 243}, {{10, 0, 0, 243}, 26645}}
             ]
         }
     ],
@@ -651,7 +588,7 @@ state4_test() ->
         {
             {tcp, {1, 2, 3, 4}, 5000},
             [
-                {{10, 0, 0, 243}, 26645}
+                {{10, 0, 0, 243}, {{10, 0, 0, 243}, 26645}}
             ]
         }
     ],
@@ -665,13 +602,13 @@ state5_test() ->
         {
             {tcp, {1, 2, 3, 4}, 5000},
             [
-                {{10, 0, 0, 243}, 26645}
+                {{10, 0, 0, 243}, {{10, 0, 0, 243}, 26645}}
             ]
         },
         {
             {udp, {1, 2, 3, 4}, 5000},
             [
-                {{10, 0, 0, 243}, 26645}
+                {{10, 0, 0, 243}, {{10, 0, 0, 243}, 26645}}
             ]
         }
     ],
@@ -685,7 +622,7 @@ di_state_test() ->
         {
             {tcp, {1, 2, 3, 4}, 8080},
             [
-                {{10, 0, 2, 234}, 19426}
+                {{10, 0, 2, 234}, {{10, 0, 2, 234}, 19426}}
             ]
         }
     ],
@@ -700,7 +637,7 @@ named_vips_test() ->
         {
             {tcp, {name, {<<"merp">>, <<"marathon">>}}, 5000},
             [
-                {{10, 0, 0, 243}, 12049}
+                {{10, 0, 0, 243}, {{10, 0, 0, 243}, 12049}}
             ]
         }
     ],
@@ -713,7 +650,7 @@ missing_port_test() ->
     Expected = [],
     ?assertEqual(Expected, VIPBes).
 
-agent_vips_test() ->
+filter_vips_test() ->
     AgentIP = {1, 1, 1, 1},
     FakeAgentIP = {1, 1, 1, 2},
     VIP1 = {2, 2, 2, 2},
@@ -722,37 +659,9 @@ agent_vips_test() ->
                          vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049},
                 #vip_be2{vip_ip = VIP2, agent_ip = FakeAgentIP, protocol = tcp,
                          vip_port = 5000, backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
-   FilterVIPs = agent_vips(AgentIP, FlatVIPs),
-   Expected = [#vip_be{vip_ip = VIP1, protocol = tcp, vip_port = 5000,
+   FilterVIPs = filter_vips_from_agent(AgentIP, FlatVIPs),
+   Expected = [#vip_be2{vip_ip = VIP1, agent_ip = AgentIP, protocol = tcp, vip_port = 5000,
                backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
-   ?assertEqual(Expected, FilterVIPs).
-
-filter_vips_test() ->
-   AgentIP = {1, 1, 1, 1},
-   FlatLashupVIPs = [#vip_be{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
-                             backend_ip = AgentIP, backend_port = 12049}],
-   FilterVIPs = filter_vips_from_agent(AgentIP, FlatLashupVIPs, []),
-   Expected = FlatLashupVIPs,
-   ?assertEqual(Expected, FilterVIPs).
-
-filter_vips_1_test() ->
-   AgentIP = {1, 1, 1, 1},
-   FlatLashupVIPs = [#vip_be{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
-                             backend_ip = AgentIP, backend_port = 12049}],
-   FlatLashupVIPs2 = [#vip_be2{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
-                               agent_ip = AgentIP, backend_ip = AgentIP, backend_port = 12049}],
-   FilterVIPs = filter_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2),
-   Expected = FlatLashupVIPs,
-   ?assertEqual(Expected, FilterVIPs).
-
-filter_vips_2_test() ->
-   AgentIP = {1, 1, 1, 1},
-   FlatLashupVIPs = [#vip_be{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
-                             backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
-   FlatLashupVIPs2 = [#vip_be2{vip_ip = {2, 2, 2, 2}, vip_port = 5000, protocol = tcp,
-                               agent_ip = AgentIP, backend_ip = {10, 0, 0, 243}, backend_port = 12049}],
-   FilterVIPs = filter_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2),
-   Expected = FlatLashupVIPs,
    ?assertEqual(Expected, FilterVIPs).
 
 flatten_vips_test() ->

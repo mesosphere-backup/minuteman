@@ -52,25 +52,25 @@ lookup_failure(_Config) ->
   ok.
 
 lookup_failure2(Config) ->
-  {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update,
+  {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
                                                        {{tcp, {1, 2, 3, 4}, 5000}, riak_dt_orswot},
-                                                       {add, {{10, 0, 1, 10}, 17780}}}]}),
+                                                       {add, {{10, 0, 1, 10}, {{10, 0, 1, 10}, 17780}}}}]}),
   lookup_failure(Config),
   ok.
 
 lookup_failure3(Config) ->
-  {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update,
+  {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
                                                        {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 6000},
                                                         riak_dt_orswot},
-                                                       {add, {{10, 0, 1, 31}, 12998}}}]}),
+                                                       {add, {{10, 0, 1, 31}, {{10, 0, 1, 31}, 12998}}}}]}),
   lookup_failure(Config),
   ok.
 
 lookup_vip(_Config) ->
-  {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update,
+  {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
                                                        {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 6000},
                                                         riak_dt_orswot},
-                                                       {add, {{10, 0, 1, 31}, 12998}}}]}),
+                                                       {add, {{10, 0, 1, 31}, {{10, 0, 1, 31}, 12998}}}}]}),
   [] = minuteman_lashup_vip_listener:lookup_vips([]),
   [{ip, IP}] = minuteman_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
   [{name, <<"de8b9dc86.marathon">>}] = minuteman_lashup_vip_listener:lookup_vips([{ip, IP}]),

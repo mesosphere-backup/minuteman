@@ -95,10 +95,10 @@ test_one_conn(_Config) ->
     ok.
 
 test_named_vip(_Config) ->
-    {ok, _} = lashup_kv:request_op(?VIPS_KEY, {update, [{update,
+    {ok, _} = lashup_kv:request_op(?VIPS_KEY2, {update, [{update,
                                                        {{tcp, {name, {<<"de8b9dc86">>, <<"marathon">>}}, 8080},
                                                         riak_dt_orswot},
-                                                       {add, {{10, 0, 79, 182}, 8080}}}]}),
+                                                       {add, {{10, 0, 79, 182}, {{10, 0, 79, 182}, 8080}}}}]}),
     [{ip, IP}] = minuteman_lashup_vip_listener:lookup_vips([{name, <<"de8b9dc86.marathon">>}]),
     ct:pal("change the testdata if it doesn't match ip: ~p", [IP]),
     push_metrics = erlang:send(minuteman_metrics, push_metrics),
