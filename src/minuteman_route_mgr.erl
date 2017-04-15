@@ -199,7 +199,7 @@ add_route(Dst, #state{netlink = Pid, iface = Iface}) ->
         _Type = local,
         _Flags = [],
         Msg},
-    {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, excl], Route).
+    {ok, _} = gen_netlink_client:rtnl_request(Pid, newroute, [create, replace], Route).
 
 remove_route(Dst, #state{netlink = Pid, iface = Iface}) ->
     Msg = [{table, ?LOCAL_TABLE}, {dst, Dst}, {oif, Iface}],
