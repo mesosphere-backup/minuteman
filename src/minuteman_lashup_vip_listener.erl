@@ -313,7 +313,7 @@ push_zone(Zone) ->
 spartan_name() ->
     [_Node, Host] = binary:split(atom_to_binary(node(), utf8), <<"@">>),
     SpartanBinName = <<"spartan@", Host/binary>>,
-    binary_to_atom(SpartanBinName, utf8).
+    binary_to_atom2(SpartanBinName, utf8).
 
 -spec(zone([binary()], state()) -> {Name :: binary(), Sha :: binary(), [#dns_rr{}]}).
 zone(ZoneComponents, State) ->
@@ -497,6 +497,14 @@ process_vips(Protocol) ->
     ?assertEqual(Expected, Out),
     State.
 
+binary_to_atom2(Binary, Encoding) ->
+    try binary_to_existing_atom(Binary, Encoding) of
+        Atom ->
+            Atom
+    catch
+        _:_ ->
+            binary_to_atom(Binary, Encoding)
+    end.
 
 
 update_name_mapping_test() ->
