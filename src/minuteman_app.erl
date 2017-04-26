@@ -35,11 +35,11 @@ load_config_file(Filename) ->
     case file:consult(Filename) of
         {ok, []} ->
             lager:info("Found an empty config file: ~p~n", [Filename]);
-        {error, eacces} ->
-            lager:info("Couldn't load config: ~p", [Filename]);
         {ok, Result} ->
             load_config(Result),
-            lager:info("Loaded config: ~p", [Filename])
+            lager:info("Loaded config: ~p", [Filename]);
+        {error, Reason} ->
+            lager:info("Couldn't load config: ~p, Reason:~p", [Filename, Reason])
     end.
 
 load_config([Result = [_]]) ->
@@ -47,4 +47,3 @@ load_config([Result = [_]]) ->
 
 load_app_config({App, Options}) ->
     lists:foreach(fun({OptionKey, OptionValue}) -> application:set_env(App, OptionKey, OptionValue) end, Options).
-
