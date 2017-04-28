@@ -204,6 +204,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% The difference is rt netlink, versus conntrack decoding
 nfnl_query(Socket, Query) ->
   Request = netlink:nl_rt_enc(Query),
+  lager:debug("Request: ~p", [Request]),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
   Answer = gen_socket:recv(Socket, 8192),
   lager:debug("Answer: ~p~n", [Answer]),
@@ -255,6 +256,7 @@ handle_get_route_real(Addr, Socket) when is_tuple(Addr) ->
   Flags = [],
   Msg = {Family, DstLen, SrcLen, Tos, Table, Protocol, Scope, RtmType, Flags, Req},
   Query = [#rtnetlink{type = getroute, flags=[request], seq = Seq, pid = 0, msg = Msg}],
+  lager:debug("Sending query: ~p", [Query]),
   handle_nfnl_response(nfnl_query(Socket, Query)).
 
 handle_nfnl_response({error, Msg}) ->

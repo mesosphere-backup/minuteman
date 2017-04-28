@@ -191,6 +191,7 @@ handle_info({Socket, input_ready}, State = #state{socket = Socket, vips = Vips, 
   case gen_socket:recv(Socket, 8192) of
     {ok, Data} ->
       Msg = netlink:nl_ct_dec(Data),
+      lager:debug("Received: ~p", [Msg]),
       lists:foreach(HandleFun, Msg);
     Other ->
       lager:warning("Unknown msg (ct_latency): ~p", [Other])

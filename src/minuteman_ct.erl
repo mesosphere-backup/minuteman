@@ -159,6 +159,7 @@ handle_info({Socket, input_ready}, State = #state{socket = Socket}) ->
   case gen_socket:recv(Socket, ?RECV_SIZE) of
     {ok, Data} ->
       Msg = netlink:nl_ct_dec(Data),
+      lager:debug("Received ~p", [Msg]),
       case Msg of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
@@ -214,12 +215,13 @@ code_change(_OldVsn, State, _Extra) ->
 
 nfnl_query(Socket, Query) ->
   Request = netlink:nl_ct_enc(Query),
+  lager:debug("Request: ~p", [Request]),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
   gen_socket:input_event(Socket, true),
   receive
     {Socket, input_ready} ->
       {ok, Reply} = gen_socket:recv(Socket, 8192),
-      ?MM_LOG("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
+      lager:debug("Reply: ~p", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
