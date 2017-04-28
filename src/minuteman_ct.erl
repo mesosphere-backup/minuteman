@@ -221,7 +221,7 @@ nfnl_query(Socket, Query) ->
   receive
     {Socket, input_ready} ->
       {ok, Reply} = gen_socket:recv(Socket, 8192),
-      lager:debug("Reply: ~p", [netlink:nl_ct_dec(Reply)]),
+      lager:debug("Reply: ~p", [Reply]),
       case netlink:nl_ct_dec(Reply) of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;

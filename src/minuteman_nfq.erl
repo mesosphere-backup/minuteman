@@ -218,7 +218,6 @@ nfnl_query(Socket, Query) ->
   lager:debug("Answer: ~p", [Answer]),
   case Answer of
     {ok, Reply} ->
-      lager:debug("Reply: ~p", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
