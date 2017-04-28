@@ -212,12 +212,12 @@ build_send_cfg_msg(Socket, Command, Queue, Pf) ->
 
 nfnl_query(Socket, Query) ->
   Request = netlink:nl_ct_enc(Query),
+  lager:debug("Request: ~p", [Request]),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request),
   Answer = gen_socket:recv(Socket, 8192),
-  ?MM_LOG("Answer: ~p~n", [Answer]),
+  lager:debug("Answer: ~p", [Answer]),
   case Answer of
     {ok, Reply} ->
-      ?MM_LOG("Reply: ~p~n", [netlink:nl_ct_dec(Reply)]),
       case netlink:nl_ct_dec(Reply) of
         [{netlink, error, [], _, _, {ErrNo, _}}|_] when ErrNo == 0 ->
           ok;
@@ -259,7 +259,7 @@ nfq_set_mode(Socket, Queue, CopyMode, CopyLen) ->
 process_nfq_msgs([], _State) ->
   ok;
 process_nfq_msgs([Msg|Rest], State) ->
-  ?MM_LOG("NFQ-Msg: ~p~n", [Msg]),
+  lager:debug("NFQ-Msg: ~p", [Msg]),
   process_nfq_msg(Msg, State),
   process_nfq_msgs(Rest, State).
 
@@ -279,6 +279,7 @@ process_nfq_packet({_Family, _Version, _Queue, Info},
   lager:warning("NLA: ~p", [NLA]),
   Msg = {queue, verdict, [request], 0, 0, {unspec, 0, Queue, NLA}},
   Request = netlink:nl_ct_enc(Msg),
+  lager:debug("Request: ~p", [Request]),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
 
 
@@ -288,6 +289,7 @@ accept_packet(Info, _State = #state{queue = Queue, socket = Socket}) ->
   NLA = [{verdict_hdr, ?NF_ACCEPT, Id}],
   Msg = {queue, verdict, [request], 0, 0, {unspec, 0, Queue, NLA}},
   Request = netlink:nl_ct_enc(Msg),
+  lager:debug("Request ~p", [Request]),
   gen_socket:sendto(Socket, netlink:sockaddr_nl(netlink, 0, 0), Request).
 
 
