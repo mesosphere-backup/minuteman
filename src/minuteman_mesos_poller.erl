@@ -285,7 +285,7 @@ filter_vips_from_agent(AgentIP, FlatLashupVIPs, FlatLashupVIPs2) ->
 agent_vips(AgentIP, VIPBEs) ->
     agent_vips(AgentIP, VIPBEs, []).
 
-agent_vips(_, [], Acc) -> Acc;
+agent_vips(_, [], Acc) -> lists:reverse(Acc);
 agent_vips(AIP, [#vip_be{backend_ip = AIP}=V|R], Acc) -> agent_vips(AIP, R, [V|Acc]);
 agent_vips(AIP, [#vip_be2{agent_ip = AIP}=V2|R], Acc) -> agent_vips(AIP, R, [vipbe2_to_vipbe(V2)|Acc]);
 agent_vips(AIP, [_|R], Acc) -> agent_vips(AIP, R, Acc).
