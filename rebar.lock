@@ -61,7 +61,7 @@
   0},
  {<<"lashup">>,
   {git,"git://github.com/dcos/lashup.git",
-       {ref,"f2a20fa1033724cf47724e6c9d701f4dcd4b4e01"}},
+       {ref,"e831653c7a8eb3cb44e8ebed08c3164e31849975"}},
   0},
  {<<"meck">>,
   {git,"https://github.com/eproxus/meck",
