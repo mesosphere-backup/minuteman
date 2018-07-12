@@ -213,10 +213,10 @@ generate_diff([{VIP, BELhs}|RestLhs], [{VIP, BERhs}|RestRhs], VIPsToAdd, VIPsToR
     Mutation = {VIP, BEToAdd, BEToRemove},
     generate_diff(RestLhs, RestRhs, VIPsToAdd, VIPsToRemove, [Mutation|Mutations0]);
 %% New VIP
-generate_diff(Lhs = [VIPLhs|_RestLhs], [VIPRhs|RestRhs], VIPsToAdd0, VIPsToRemove, Mutations) when VIPRhs > VIPLhs ->
+generate_diff(Lhs = [VIPLhs|_RestLhs], [VIPRhs|RestRhs], VIPsToAdd0, VIPsToRemove, Mutations) when VIPLhs > VIPRhs ->
     generate_diff(Lhs, RestRhs, [VIPRhs|VIPsToAdd0], VIPsToRemove, Mutations);
 %% To delete VIP
-generate_diff([VIPLhs|RestLhs], Rhs = [VIPRhs|_RestRhs], VIPsToAdd, VIPsToRemove0, Mutations) when VIPRhs < VIPLhs ->
+generate_diff([VIPLhs|RestLhs], Rhs = [VIPRhs|_RestRhs], VIPsToAdd, VIPsToRemove0, Mutations) when VIPLhs < VIPRhs ->
     generate_diff(RestLhs, Rhs, VIPsToAdd, [VIPLhs|VIPsToRemove0], Mutations);
 generate_diff([], [], VIPsToAdd, VIPsToRemove, Mutations) ->
     {VIPsToAdd, VIPsToRemove, Mutations};
