@@ -375,8 +375,8 @@ handle_add_dest(ServiceIP, ServicePort, DestIP, DestPort, Protocol, State) ->
 -spec(handle_add_dest(Service :: service(), IP :: inet:ip4_address(),
                       Port :: inet:port_number(), State :: state()) -> ok | error).
 handle_add_dest(Service, IP, Port, #state{netlink_generic = Pid, family = Family}) ->
-    Base = [{fwd_method, ?IP_VS_CONN_F_MASQ}, {weight, 1}, {u_threshold, 0}, {l_threshold, 0}],
-    Dest = [{port, Port}] ++ Base ++ ip_to_address(IP),
+    Base = [{port, Port}, {fwd_method, ?IP_VS_CONN_F_MASQ}, {weight, 1}, {u_threshold, 0}, {l_threshold, 0}],
+    Dest = ip_to_address(IP) ++ Base,
     lager:info("Adding backend ~p to service ~p~n", [{IP, Port}, Service]),
     Msg = #new_dest{request = [{dest, Dest}, {service, Service}]},
     case gen_netlink_client:request(Pid, Family, ipvs, [], Msg) of
