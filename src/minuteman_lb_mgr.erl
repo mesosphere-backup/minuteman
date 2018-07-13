@@ -213,10 +213,10 @@ generate_diff([{VIP, BELhs}|RestLhs], [{VIP, BERhs}|RestRhs], VIPsToAdd, VIPsToR
     Mutation = {VIP, BEToAdd, BEToRemove},
     generate_diff(RestLhs, RestRhs, VIPsToAdd, VIPsToRemove, [Mutation|Mutations0]);
 %% New VIP
-generate_diff(Lhs = [VIPLhs|_RestLhs], [VIPRhs|RestRhs], VIPsToAdd0, VIPsToRemove, Mutations) when VIPRhs > VIPLhs ->
+generate_diff(Lhs = [VIPLhs|_RestLhs], [VIPRhs|RestRhs], VIPsToAdd0, VIPsToRemove, Mutations) when VIPLhs > VIPRhs ->
     generate_diff(Lhs, RestRhs, [VIPRhs|VIPsToAdd0], VIPsToRemove, Mutations);
 %% To delete VIP
-generate_diff([VIPLhs|RestLhs], Rhs = [VIPRhs|_RestRhs], VIPsToAdd, VIPsToRemove0, Mutations) when VIPRhs < VIPLhs ->
+generate_diff([VIPLhs|RestLhs], Rhs = [VIPRhs|_RestRhs], VIPsToAdd, VIPsToRemove0, Mutations) when VIPLhs < VIPRhs ->
     generate_diff(RestLhs, Rhs, VIPsToAdd, [VIPLhs|VIPsToRemove0], Mutations);
 generate_diff([], [], VIPsToAdd, VIPsToRemove, Mutations) ->
     {VIPsToAdd, VIPsToRemove, Mutations};
@@ -309,5 +309,18 @@ generate_diffs_test() ->
         {[], [], [{{tcp, {11, 136, 231, 163}, 80},
                      [{{10, 0, 1, 107}, {{10, 0, 1, 107}, 18818}},
                       {{10, 0, 3, 98}, {{10, 0, 3, 98}, 12930}}],
-         []}]}, Diff2).
+         []}]}, Diff2),
+    ?assertEqual(
+        {[{{tcp, {1, 1, 1, 3}, 80}, [{{10, 0, 0, 3}, {{10, 0, 0, 3}, 1000}}]}], [], []},
+        generate_diff(
+            [ {{tcp, {1, 1, 1, 1}, 80}, [{{10, 0, 0, 1}, {{10, 0, 0, 1}, 1000}}]},
+              {{tcp, {1, 1, 1, 2}, 80}, [{{10, 0, 0, 2}, {{10, 0, 0, 2}, 1000}}]},
+              {{tcp, {1, 1, 1, 4}, 80}, [{{10, 0, 0, 4}, {{10, 0, 0, 4}, 1000}}]},
+              {{tcp, {1, 1, 1, 5}, 80}, [{{10, 0, 0, 5}, {{10, 0, 0, 5}, 1000}}]} ],
+            [ {{tcp, {1, 1, 1, 1}, 80}, [{{10, 0, 0, 1}, {{10, 0, 0, 1}, 1000}}]},
+              {{tcp, {1, 1, 1, 2}, 80}, [{{10, 0, 0, 2}, {{10, 0, 0, 2}, 1000}}]},
+              {{tcp, {1, 1, 1, 3}, 80}, [{{10, 0, 0, 3}, {{10, 0, 0, 3}, 1000}}]},
+              {{tcp, {1, 1, 1, 4}, 80}, [{{10, 0, 0, 4}, {{10, 0, 0, 4}, 1000}}]},
+              {{tcp, {1, 1, 1, 5}, 80}, [{{10, 0, 0, 5}, {{10, 0, 0, 5}, 1000}}]} ])).
+
 -endif.
