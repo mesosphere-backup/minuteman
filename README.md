@@ -5,9 +5,12 @@
 
 A distributed, highly available service discovery & internal load balancer for distributed systems (microservices and containers).
 
+* [Slides](https://docs.google.com/presentation/d/1KkyQL_kibE3O6OovvGT_06W-4c3BSxDpDZo5w3kB7Bk)
+
 ## Powers:
 * VIPs: https://dcos.io/docs/1.7/overview/service-discovery/
 * [DC/OS](http://dcos.io)
+
 
 ## Usage
 You can use the layer 4 load balancer by specifying a VIP from the Marathon UI. The VIP must be specified in the format IP:port, for example: *10.1.2.3:5000*. Alternatively, if you're using something other than Marathon, you can create a label on the [port](https://github.com/apache/mesos/blob/b18f5bf48fda12bce9c2ac8e762a08f537ffb41d/include/mesos/mesos.proto#L1813) protocol buffer while launching a task on Mesos. This label's key must be in the format `VIP_$IDX`, where `$IDX` is replaced by a number, starting from 0. Once you create a task, or a set of tasks with a VIP, they will automatically become available to all nodes in the cluster, including the masters.
